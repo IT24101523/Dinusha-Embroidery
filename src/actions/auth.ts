@@ -6,6 +6,36 @@ import { redirect } from 'next/navigation';
 import { db } from '@/db';
 import { userProfiles } from '@/db/schema';
 
+import { cookies } from 'next/headers';
+
+export const DEMO_ACCOUNTS: Record<string, { role: 'CEO' | 'FACTORY_MANAGER' | 'HR_NEEDLE_MANAGER' | 'PRODUCTION_MANAGER' | 'QUALITY_MANAGER'; fullName: string; password: string }> = {
+  'ceo@dinusha.com': {
+    role: 'CEO',
+    fullName: 'Dinusha Wickramasinghe',
+    password: 'Dinusha@2026',
+  },
+  'manager@dinusha.com': {
+    role: 'FACTORY_MANAGER',
+    fullName: 'Kamal Silva',
+    password: 'Dinusha@2026',
+  },
+  'production@dinusha.com': {
+    role: 'PRODUCTION_MANAGER',
+    fullName: 'Nimal Perera',
+    password: 'Dinusha@2026',
+  },
+  'quality@dinusha.com': {
+    role: 'QUALITY_MANAGER',
+    fullName: 'Sunil Fernando',
+    password: 'Dinusha@2026',
+  },
+  'hr@dinusha.com': {
+    role: 'HR_NEEDLE_MANAGER',
+    fullName: 'Anura Bandara',
+    password: 'Dinusha@2026',
+  },
+};
+
 interface ActionResult {
   success: boolean;
   error?: string;
@@ -23,18 +53,54 @@ export async function loginAction(formData: FormData): Promise<ActionResult> {
     return { success: false, error: errorMsg };
   }
 
-  const supabase = await createServerSupabaseClient();
+  const emailLower = validated.data.email.toLowerCase().trim();
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email: validated.data.email,
-    password: validated.data.password,
-  });
-
-  if (error) {
-    return { success: false, error: 'Invalid email or password. Please try again.' };
+  // Check demo accounts for local testing
+  const demoAccount = DEMO_ACCOUNTS[emailLower];
+  if (demoAccount && validated.data.password === demoAccount.password) {
+    const cookieStore = await cookies();
+    cookieStore.set(
+      'factory_local_session',
+      JSON.stringify({
+        email: emailLower,
+        fullName: demoAccount.fullName,
+        role: demoAccount.role,
+      }),
+      {
+        path: '/',
+        httpOnly: true,
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+      }
+    );
+    return { success: true };
   }
 
-  return { success: true };
+  // Supabase Auth
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: validated.data.email,
+      password: validated.data.password,
+    });
+
+    if (error) {
+      if (process.env.NEXT_PUBLIC_SUPABASE_URL?.includes('placeholder') || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        return {
+          success: false,
+          error: 'Local mode: Use a demo account (e.g. ceo@dinusha.com / Dinusha@2026) or connect Supabase.',
+        };
+      }
+      return { success: false, error: 'Invalid email or password. Please try again.' };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.warn('Auth sign-in fallback:', err);
+    return {
+      success: false,
+      error: 'Use a demo account (e.g. ceo@dinusha.com / Dinusha@2026) for local testing.',
+    };
+  }
 }
 
 export async function registerAction(formData: FormData): Promise<ActionResult> {
@@ -89,8 +155,14 @@ export async function registerAction(formData: FormData): Promise<ActionResult> 
 }
 
 export async function logoutAction(): Promise<void> {
-  const supabase = await createServerSupabaseClient();
-  await supabase.auth.signOut();
+  try {
+    const cookieStore = await cookies();
+    cookieStore.delete('factory_local_session');
+    const supabase = await createServerSupabaseClient();
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn('Logout fallback:', err);
+  }
   redirect('/login');
 }
 

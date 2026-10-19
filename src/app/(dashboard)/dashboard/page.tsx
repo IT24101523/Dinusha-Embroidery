@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { db } from '@/db';
 import { userProfiles } from '@/db/schema';
@@ -7,9 +8,26 @@ import { DashboardClient } from './dashboard-client';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  let userEmail = 'admin@dinusha.lk';
-  let userName = 'Factory Operations Manager';
+  let userEmail = 'manager@dinusha.com';
+  let userName = 'Kamal Silva';
   let userRole = 'FACTORY_MANAGER';
+
+  try {
+    const cookieStore = await cookies();
+    const localSession = cookieStore.get('factory_local_session')?.value;
+    if (localSession) {
+      try {
+        const parsed = JSON.parse(localSession);
+        if (parsed.email) userEmail = parsed.email;
+        if (parsed.fullName) userName = parsed.fullName;
+        if (parsed.role) userRole = parsed.role;
+      } catch {
+        // ignore parse error
+      }
+    }
+  } catch {
+    // ignore cookie read error
+  }
 
   try {
     const supabase = await createServerSupabaseClient();
