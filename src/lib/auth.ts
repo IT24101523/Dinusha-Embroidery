@@ -23,6 +23,15 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const registerSchema = z.object({
+  name: z.string().min(2, "Full name must be at least 2 characters"),
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  role: z.enum(["CEO", "FACTORY_MANAGER", "HR_NEEDLE_MANAGER", "PRODUCTION_MANAGER", "QUALITY_MANAGER"]),
+});
+
+export type RegisterInput = z.infer<typeof registerSchema>;
+
 export async function createSessionToken(user: SessionUser): Promise<string> {
   return await new SignJWT({ ...user })
     .setProtectedHeader({ alg: "HS256" })
@@ -96,6 +105,55 @@ export async function authenticateUser(input: LoginInput): Promise<{ success: bo
     email: user.email,
     name: user.name,
     role: user.role as UserRole,
+  };
+
+  await setSessionCookie(sessionUser);
+  return { success: true, user: sessionUser };
+}
+
+export async function registerUser(input: RegisterInput): Promise<{ success: boolean; user?: SessionUser; error?: string }> {
+  const validated = registerSchema.safeParse(input);
+  if (!validated.success) {
+    return { success: false, error: validated.error.issues[0]?.message };
+  }
+
+  const supabase = createServerSupabaseClient();
+  const emailLower = validated.data.email.toLowerCase().trim();
+
+  // Check if email already registered
+  const { data: existingUser } = await supabase
+    .from("users")
+    .select("id")
+    .eq("email", emailLower)
+    .maybeSingle();
+
+  if (existingUser) {
+    return { success: false, error: "An account with this email address already exists" };
+  }
+
+  const passwordHash = await bcrypt.hash(validated.data.password, 10);
+
+  const { data: newUser, error } = await supabase
+    .from("users")
+    .insert({
+      name: validated.data.name.trim(),
+      email: emailLower,
+      password_hash: passwordHash,
+      role: validated.data.role,
+    })
+    .select("id, email, name, role")
+    .single();
+
+  if (error || !newUser) {
+    console.error("User registration error:", error);
+    return { success: false, error: "Failed to register user. Please try again." };
+  }
+
+  const sessionUser: SessionUser = {
+    id: newUser.id,
+    email: newUser.email,
+    name: newUser.name,
+    role: newUser.role as UserRole,
   };
 
   await setSessionCookie(sessionUser);

@@ -176,6 +176,15 @@ export default function LoginPage() {
             </button>
           </form>
 
+          <div className="mt-4 text-center">
+            <p className="text-xs text-slate-500">
+              Need a new account?{" "}
+              <a href="/register" className="text-persian-700 font-extrabold hover:underline">
+                Register staff here
+              </a>
+            </p>
+          </div>
+
           {/* Quick-Select Demo Credentials Section */}
           <div className="mt-6 pt-5 border-t border-slate-200">
             <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 mb-2.5 flex items-center justify-between">
