@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --color-persian-50: #f0f4fa;
+  --color-persian-100: #d9e4f5;
+  --color-persian-200: #b8ceeb;
+  --color-persian-300: #8baede;
+  --color-persian-400: #5a8ad0;
+  --color-persian-500: #1c39bb;
+  --color-persian-600: #132ea0;
+  --color-persian-700: #0e2280;
+  --color-persian-800: #002d62;
+  --color-persian-900: #001a3d;
+
+  --color-surface: #ffffff;
+  --color-cardbg: #f8fafc;
+  --color-linebg: #f1f5f9;
+}
+
+:root {
+  --background: #F8FAFC;
+  --foreground: #0f172a;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Persian Blue Brand Classes for backward-compatibility */
+.bg-persian-50 { background-color: #f0f4fa; }
+.bg-persian-100 { background-color: #d9e4f5; }
+.bg-persian-500 { background-color: #1c39bb; }
+.bg-persian-600 { background-color: #132ea0; }
+.bg-persian-700 { background-color: #0e2280; }
+.bg-persian-800 { background-color: #002d62; }
+.bg-persian-900 { background-color: #001a3d; }
+
+.hover\:bg-persian-50:hover { background-color: #f0f4fa; }
+.hover\:bg-persian-500:hover { background-color: #1c39bb; }
+.hover\:bg-persian-800:hover { background-color: #002d62; }
+
+.text-persian-500 { color: #1c39bb; }
+.text-persian-600 { color: #132ea0; }
+.text-persian-800 { color: #002d62; }
+.hover\:text-persian-800:hover { color: #002d62; }
+
+.border-persian-500 { border-color: #1c39bb; }
+.border-persian-600 { border-color: #132ea0; }
+.border-persian-800 { border-color: #002d62; }
+.focus-visible\:ring-persian-500:focus-visible { --tw-ring-color: #1c39bb; }
+.focus-visible\:border-persian-500:focus-visible { border-color: #1c39bb; }
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
