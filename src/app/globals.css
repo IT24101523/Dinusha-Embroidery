@@ -57,8 +57,8 @@ body {
   scrollbar-color: #cbd5e1 #f1f5f9;
 }
 .scrollbar-thin::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 .scrollbar-thin::-webkit-scrollbar-track {
   background: #f1f5f9;
@@ -70,3 +70,58 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+.matrix-grid {
+  background-size: calc(100% / 11) 100%;
+  background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px);
+}
+
+.shadow-soft {
+  box-shadow: 0 4px 20px -2px rgba(0, 45, 98, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+}
+
+.glow-target-met {
+  border-left: 4px solid #10b981 !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+.glow-target-near {
+  border-left: 4px solid #f59e0b !important;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+.glow-target-behind {
+  border-left: 4px solid #ef4444 !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-area, .printable-area * {
+    visibility: visible;
+  }
+  .printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    page-break-after: always;
+    margin: 0 auto;
+    box-shadow: none !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 6mm;
+  }
+}
+
