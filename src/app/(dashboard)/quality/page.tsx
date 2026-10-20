@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   CheckCircle2,
@@ -16,30 +16,18 @@ import {
   Target,
   Truck,
   Users,
+  RefreshCw,
+  AlertCircle,
+  ChevronRight,
 } from 'lucide-react';
-
-interface CheckingBlock {
-  id: string;
-  client: string;
-  style: string;
-  startCol: number;
-  span: number;
-  plan: number;
-  actual: number;
-}
-
-interface CheckerRow {
-  id: string;
-  status: 'ACTIVE' | 'IDLE';
-  styles: CheckingBlock[];
-}
-
-interface StyleMasterItem {
-  name: string;
-  company: string;
-  orderQty: number;
-  todayDeliveryQty: number;
-}
+import { fetchDbStyles, fetchDbClients, DbStyle, DbClient } from '@/actions/master-data';
+import {
+  fetchQualityAssignments,
+  createQualityAssignment,
+  updateQualityActualQty,
+  deleteQualityAssignment,
+  DbQualityAssignment,
+} from '@/actions/quality';
 
 const SHIFT_HOURS = [
   '08:00',
@@ -55,149 +43,87 @@ const SHIFT_HOURS = [
   '18:00',
 ];
 
-const CHECKER_NAMES = [
-  'YAMUNA',
-  'DILRUKSHI',
-  'SACHINI',
-  'NAWODHYA',
-  'NADEERA',
-  'BIMESHA',
-  'RAMALSHA',
-  'NETHMINI',
+const DEFAULT_STATIONS = [
+  'Checker Table 01 (Yamuna)',
+  'Checker Table 02 (Dilrukshi)',
+  'Checker Table 03 (Sachini)',
+  'Checker Table 04 (Nawodhya)',
+  'Checker Table 05 (Nadeera)',
+  'Checker Table 06 (Bimesha)',
+  'Checker Table 07 (Ramalsha)',
+  'Checker Table 08 (Nethmini)',
 ];
-
-const INITIAL_STYLES: StyleMasterItem[] = [
-  { name: 'Miami Denim', company: 'Nike Apparel', orderQty: 2500, todayDeliveryQty: 1000 },
-  { name: 'Miami Strawberry', company: 'Motif Brand', orderQty: 1500, todayDeliveryQty: 500 },
-  { name: 'F/S Animals', company: 'Tesco Sri Lanka', orderQty: 1800, todayDeliveryQty: 800 },
-  { name: 'Miami Big love', company: 'Adidas Sportswear', orderQty: 3200, todayDeliveryQty: 1200 },
-  { name: 'Track Jacket Logo #102', company: 'Nike Apparel', orderQty: 2000, todayDeliveryQty: 0 },
-];
-
-const CLIENT_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  'Nike Apparel': {
-    bg: 'bg-indigo-50/90',
-    text: 'text-indigo-950',
-    border: 'border-indigo-300',
-  },
-  'Motif Brand': {
-    bg: 'bg-amber-50/90',
-    text: 'text-amber-950',
-    border: 'border-amber-300',
-  },
-  'Tesco Sri Lanka': {
-    bg: 'bg-emerald-50/90',
-    text: 'text-emerald-950',
-    border: 'border-emerald-300',
-  },
-  'Adidas Sportswear': {
-    bg: 'bg-purple-50/90',
-    text: 'text-purple-950',
-    border: 'border-purple-300',
-  },
-};
 
 export default function QualityPage() {
-  const [checkers, setCheckers] = useState<CheckerRow[]>([]);
-  const [stylesMaster, setStylesMaster] = useState<StyleMasterItem[]>(INITIAL_STYLES);
+  const [styles, setStyles] = useState<DbStyle[]>([]);
+  const [clients, setClients] = useState<DbClient[]>([]);
+  const [assignments, setAssignments] = useState<DbQualityAssignment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Form State
   const todayStr = new Date().toISOString().split('T')[0];
   const [formDate, setFormDate] = useState(todayStr);
-  const [formChecker, setFormChecker] = useState('YAMUNA');
-  const [formCompany, setFormCompany] = useState('Nike Apparel');
-  const [formStyle, setFormStyle] = useState('Miami Denim');
+  const [formChecker, setFormChecker] = useState(DEFAULT_STATIONS[0]);
+  const [formClientId, setFormClientId] = useState('');
+  const [formStyleId, setFormStyleId] = useState('');
   const [formStartTime, setFormStartTime] = useState('08:00');
   const [formEndTime, setFormEndTime] = useState('18:00');
   const [formQty, setFormQty] = useState(300);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [activeCheckerId, setActiveCheckerId] = useState<string | null>(null);
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
+  const [editStyleName, setEditStyleName] = useState('');
   const [editPlanQty, setEditPlanQty] = useState(0);
   const [editActualQty, setEditActualQty] = useState(0);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  // Initial Load
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [styleData, clientData, qcData] = await Promise.all([
+        fetchDbStyles(),
+        fetchDbClients(),
+        fetchQualityAssignments(formDate),
+      ]);
+      setStyles(styleData);
+      setClients(clientData);
+      setAssignments(qcData);
+
+      if (clientData.length > 0 && !formClientId) {
+        setFormClientId(clientData[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load quality database data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [formDate, formClientId]);
+
   useEffect(() => {
-    const savedCheckers = localStorage.getItem('dinusha_checkers_data_v4');
-    const savedStyles = localStorage.getItem('dinusha_qc_styles_v4');
+    loadData();
+  }, [loadData]);
 
-    if (savedStyles) {
-      setStylesMaster(JSON.parse(savedStyles));
+  // Filter styles by selected client
+  const availableStyles = formClientId
+    ? styles.filter((s) => s.client_id === formClientId)
+    : styles;
+
+  useEffect(() => {
+    if (availableStyles.length > 0 && !availableStyles.some((s) => s.id === formStyleId)) {
+      setFormStyleId(availableStyles[0].id);
     }
+  }, [availableStyles, formStyleId]);
 
-    if (savedCheckers) {
-      setCheckers(JSON.parse(savedCheckers));
-    } else {
-      const initial: CheckerRow[] = CHECKER_NAMES.map((name, i) => {
-        const row: CheckerRow = { id: name, status: 'ACTIVE', styles: [] };
-        if (i === 0) {
-          row.styles.push({
-            id: 'b1',
-            client: 'Nike Apparel',
-            style: 'Miami Denim',
-            startCol: 1,
-            span: 5,
-            plan: 620,
-            actual: 400,
-          });
-        }
-        if (i === 1) {
-          row.styles.push({
-            id: 'b2',
-            client: 'Motif Brand',
-            style: 'Miami Strawberry',
-            startCol: 1,
-            span: 5,
-            plan: 160,
-            actual: 147,
-          });
-        }
-        if (i === 2) {
-          row.styles.push({
-            id: 'b3',
-            client: 'Tesco Sri Lanka',
-            style: 'F/S Animals',
-            startCol: 1,
-            span: 5,
-            plan: 381,
-            actual: 381,
-          });
-        }
-        return row;
-      });
-      setCheckers(initial);
-      localStorage.setItem('dinusha_checkers_data_v4', JSON.stringify(initial));
-    }
-  }, []);
-
-  const persistCheckers = (updated: CheckerRow[]) => {
-    setCheckers(updated);
-    localStorage.setItem('dinusha_checkers_data_v4', JSON.stringify(updated));
-  };
-
-  const persistStyles = (updated: StyleMasterItem[]) => {
-    setStylesMaster(updated);
-    localStorage.setItem('dinusha_qc_styles_v4', JSON.stringify(updated));
-  };
-
-  // Delivery Quota Setter
-  const setDeliveryPlan = (styleName: string) => {
-    const current = stylesMaster.find((s) => s.name === styleName)?.todayDeliveryQty || 0;
-    const input = prompt(`Set Today's Target Delivery Quantity for "${styleName}":`, current.toString());
-    if (input !== null && input !== '') {
-      const val = parseInt(input) || 0;
-      const updated = stylesMaster.map((s) =>
-        s.name === styleName ? { ...s, todayDeliveryQty: val } : s
-      );
-      persistStyles(updated);
-    }
-  };
-
-  // Push Assignment
-  const handlePushPlan = (e: React.FormEvent) => {
+  // Handle schedule push
+  const handlePushPlan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formStyleId) {
+      alert('Please select an embroidery style from Master Data.');
+      return;
+    }
+
     const startIdx = SHIFT_HOURS.indexOf(formStartTime);
     const endIdx = SHIFT_HOURS.indexOf(formEndTime);
 
@@ -206,112 +132,78 @@ export default function QualityPage() {
       return;
     }
 
-    const startCol = startIdx + 1;
-    const span = endIdx - startIdx + 1;
+    const startHour = startIdx + 1;
+    const spanHours = endIdx - startIdx + 1;
+    const selectedStyle = styles.find((s) => s.id === formStyleId);
+    const selectedClient = clients.find((c) => c.id === formClientId);
 
-    const updated = checkers.map((c) => {
-      if (c.id === formChecker) {
-        return {
-          ...c,
-          styles: [
-            ...c.styles,
-            {
-              id: `block-${Date.now()}`,
-              client: formCompany,
-              style: formStyle,
-              startCol,
-              span,
-              plan: formQty,
-              actual: 0,
-            },
-          ],
-        };
-      }
-      return c;
-    });
-
-    persistCheckers(updated);
+    setIsSubmitting(true);
+    try {
+      await createQualityAssignment({
+        checker_name: formChecker,
+        client_name: selectedClient?.name || 'Standard Client',
+        style_name: selectedStyle?.style_name || 'Embroidery Task',
+        assignment_date: formDate,
+        start_hour: startHour,
+        span_hours: spanHours,
+        plan_qty: formQty,
+        actual_qty: 0,
+      });
+      await loadData();
+    } catch (err: any) {
+      alert('Failed to schedule inspection block: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // Modal Handlers
-  const openEditModal = (checkerId: string, blockId: string) => {
-    const c = checkers.find((item) => item.id === checkerId);
-    if (!c) return;
-    const block = c.styles.find((b) => b.id === blockId);
-    if (!block) return;
-
-    setActiveCheckerId(checkerId);
-    setActiveBlockId(blockId);
-    setEditPlanQty(block.plan);
-    setEditActualQty(block.actual);
+  const openEditModal = (assignment: DbQualityAssignment) => {
+    setActiveAssignmentId(assignment.id);
+    setEditStyleName(assignment.style_name);
+    setEditPlanQty(assignment.plan_qty);
+    setEditActualQty(assignment.actual_qty);
     setModalOpen(true);
   };
 
-  const updateBlock = () => {
-    if (!activeCheckerId || !activeBlockId) return;
-
-    const updated = checkers.map((c) => {
-      if (c.id === activeCheckerId) {
-        return {
-          ...c,
-          styles: c.styles.map((b) =>
-            b.id === activeBlockId
-              ? {
-                  ...b,
-                  plan: editPlanQty,
-                  actual: editActualQty,
-                }
-              : b
-          ),
-        };
-      }
-      return c;
-    });
-
-    persistCheckers(updated);
-    setModalOpen(false);
+  const handleUpdateActual = async () => {
+    if (!activeAssignmentId) return;
+    setIsUpdating(true);
+    try {
+      await updateQualityActualQty(activeAssignmentId, editActualQty);
+      setModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert('Failed to update quality record: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const deleteBlock = () => {
-    if (!activeCheckerId || !activeBlockId) return;
-
-    const updated = checkers.map((c) => {
-      if (c.id === activeCheckerId) {
-        return {
-          ...c,
-          styles: c.styles.filter((b) => b.id !== activeBlockId),
-        };
-      }
-      return c;
-    });
-
-    persistCheckers(updated);
-    setModalOpen(false);
+  const handleDeleteAssignment = async () => {
+    if (!activeAssignmentId) return;
+    if (!confirm('Are you sure you want to delete this inspection schedule?')) return;
+    setIsUpdating(true);
+    try {
+      await deleteQualityAssignment(activeAssignmentId);
+      setModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert('Failed to delete assignment: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  // Metrics
-  const styleMetrics: Record<
-    string,
-    { orderQty: number; plannedCheckingQty: number; actualDoneQty: number; todayDeliveryQty: number; company: string }
-  > = {};
-
-  stylesMaster.forEach((sm) => {
-    styleMetrics[sm.name] = {
-      orderQty: sm.orderQty,
-      plannedCheckingQty: 0,
-      actualDoneQty: 0,
-      todayDeliveryQty: sm.todayDeliveryQty,
-      company: sm.company,
-    };
+  // Group assignments by checker name
+  const assignmentsByChecker: Record<string, DbQualityAssignment[]> = {};
+  DEFAULT_STATIONS.forEach((station) => {
+    assignmentsByChecker[station] = [];
   });
-
-  checkers.forEach((c) => {
-    c.styles.forEach((s) => {
-      if (styleMetrics[s.style]) {
-        styleMetrics[s.style].plannedCheckingQty += s.plan;
-        styleMetrics[s.style].actualDoneQty += s.actual;
-      }
-    });
+  assignments.forEach((a) => {
+    if (!assignmentsByChecker[a.checker_name]) {
+      assignmentsByChecker[a.checker_name] = [];
+    }
+    assignmentsByChecker[a.checker_name].push(a);
   });
 
   return (
@@ -319,119 +211,146 @@ export default function QualityPage() {
       {/* Top Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-200 shadow-xs no-print">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+          <div className="w-10 h-10 rounded-2xl bg-persian-50 text-persian-700 flex items-center justify-center font-bold">
             <CheckCircle2 className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-black text-sm uppercase text-slate-800">
-              Quality Checking & Day Delivery Management
+            <h3 className="font-black text-sm uppercase text-slate-800 flex items-center gap-2">
+              <span>Quality Inspection Matrix (Supabase)</span>
+              <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-mono">
+                {assignments.length} Blocks Scheduled
+              </span>
             </h3>
             <p className="text-xs text-slate-500">
-              8 Dedicated Quality Checkers • Hour-by-hour inspection tracking
+              Shift hours (08:00 - 19:00) • Final garment embroidery audit
             </p>
           </div>
         </div>
 
-        <Link
-          href="/quality/live"
-          className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all"
-        >
-          <Tv className="w-4 h-4 text-emerald-400" />
-          <span>Launch Checking Wallboard</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Sync</span>
+          </button>
+
+          <Link
+            href="/quality/live"
+            className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all"
+          >
+            <Tv className="w-4 h-4 text-emerald-400" />
+            <span>Launch QC Wallboard</span>
+          </Link>
+        </div>
       </div>
 
-      {/* 4-Box Style Breakdown Section */}
+      {/* Style Breakdown Cards */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-2">
             <Layers className="w-4 h-4 text-persian-600" />
-            <span>Style-Wise Order & Checking Breakdown (4 Metrics)</span>
+            <span>Style Inspection Status in Database</span>
           </h4>
-          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-            💡 Click &apos;Today Delivery Qty&apos; box to adjust daily target
+          <span className="text-[11px] text-slate-400 font-semibold">
+            {styles.length} Registered Styles
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-          {stylesMaster.map((sm) => {
-            const data = styleMetrics[sm.name];
+        {styles.length === 0 ? (
+          <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-6 text-center">
+            <Layers className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+            <p className="text-xs font-bold text-slate-700">No styles in database</p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Add embroidery styles in Master Data to track inspection deliverables.
+            </p>
+            <Link
+              href="/master-data"
+              className="inline-flex items-center gap-1 mt-3 text-xs font-black text-persian-700 hover:underline"
+            >
+              <span>Add Styles in Master Data</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            {styles.map((sm) => {
+              const matched = assignments.filter((a) => a.style_name === sm.style_name);
+              const plannedQty = matched.reduce((acc, a) => acc + a.plan_qty, 0);
+              const doneQty = matched.reduce((acc, a) => acc + a.actual_qty, 0);
+              const balance = Math.max(0, plannedQty - doneQty);
 
-            return (
-              <div
-                key={sm.name}
-                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col justify-between"
-              >
-                <div className="border-b border-slate-100 pb-2">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                    {data.company}
-                  </span>
-                  <h5 className="font-black text-slate-800 text-xs truncate mt-0.5">{sm.name}</h5>
+              return (
+                <div
+                  key={sm.id}
+                  className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col justify-between"
+                >
+                  <div className="border-b border-slate-100 pb-2">
+                    <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 block truncate">
+                      {sm.client?.name || 'Client'}
+                    </span>
+                    <h5 className="font-black text-slate-800 text-xs truncate mt-0.5" title={sm.style_name}>
+                      {sm.style_name}
+                    </h5>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase block">
+                        Target/Hr
+                      </span>
+                      <span className="font-black text-slate-800 text-sm">
+                        {sm.target_per_hour || 0}
+                      </span>
+                    </div>
+                    <div className="bg-amber-50/70 p-2 rounded-xl border border-amber-100">
+                      <span className="text-[9px] font-bold text-amber-800 uppercase block">
+                        Target Pcs
+                      </span>
+                      <span className="font-black text-amber-600 text-sm">
+                        {plannedQty.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-100">
+                      <span className="text-[9px] font-bold text-emerald-800 uppercase block">
+                        Passed
+                      </span>
+                      <span className="font-black text-emerald-600 text-sm">
+                        {doneQty.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="bg-indigo-50/70 p-2 rounded-xl border border-indigo-100">
+                      <span className="text-[9px] font-bold text-indigo-800 uppercase block">
+                        Balance
+                      </span>
+                      <span className="font-black text-indigo-600 text-sm">
+                        {balance.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {/* BOX 1 */}
-                  <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block">
-                      Order Qty
-                    </span>
-                    <span className="font-black text-slate-800 text-sm">
-                      {data.orderQty.toLocaleString()}
-                    </span>
-                  </div>
-
-                  {/* BOX 2 */}
-                  <div className="bg-amber-50/70 p-2 rounded-xl border border-amber-100">
-                    <span className="text-[9px] font-bold text-amber-800 uppercase block">
-                      Plan Check
-                    </span>
-                    <span className="font-black text-amber-600 text-sm">
-                      {data.plannedCheckingQty.toLocaleString()}
-                    </span>
-                  </div>
-
-                  {/* BOX 3 */}
-                  <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-100">
-                    <span className="text-[9px] font-bold text-emerald-800 uppercase block">
-                      Actual Done
-                    </span>
-                    <span className="font-black text-emerald-600 text-sm">
-                      {data.actualDoneQty.toLocaleString()}
-                    </span>
-                  </div>
-
-                  {/* BOX 4: Clickable Target Setter */}
-                  <div
-                    onClick={() => setDeliveryPlan(sm.name)}
-                    className="bg-indigo-50/70 hover:bg-indigo-100/80 p-2 rounded-xl border border-indigo-200 cursor-pointer transition-colors group"
-                  >
-                    <span className="text-[9px] font-extrabold text-indigo-800 uppercase block flex items-center justify-between">
-                      <span>Delivery Target</span>
-                      <Target className="w-2.5 h-2.5 text-indigo-600" />
-                    </span>
-                    <span className="font-black text-indigo-700 text-sm">
-                      {data.todayDeliveryQty.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
-      {/* Assignment Form */}
+      {/* QC Plan Form Scheduler */}
       <section className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-emerald-600" />
-            <span>Assign Checker & Timeline Block</span>
+            <Plus className="w-4 h-4 text-persian-600" />
+            <span>Schedule Checking Session</span>
           </h4>
-          <span className="text-[11px] text-slate-400">Day Shift (08:00 - 19:00)</span>
+          <span className="text-[11px] text-slate-400">
+            Saves directly to Supabase quality_assignments table
+          </span>
         </div>
 
         <form onSubmit={handlePushPlan} className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block text-[10px] font-bold text-slate-600 mb-1">Date *</label>
               <input
@@ -439,65 +358,69 @@ export default function QualityPage() {
                 value={formDate}
                 onChange={(e) => setFormDate(e.target.value)}
                 required
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-emerald-500"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
               />
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Shift</label>
-              <select className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none">
-                <option value="day">Day Shift (08:00 - 19:00)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Checker *</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                Checker Station *
+              </label>
               <select
                 value={formChecker}
                 onChange={(e) => setFormChecker(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-emerald-500"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
               >
-                {CHECKER_NAMES.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+                {DEFAULT_STATIONS.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Company *</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Client *</label>
               <select
-                value={formCompany}
-                onChange={(e) => setFormCompany(e.target.value)}
+                value={formClientId}
+                onChange={(e) => setFormClientId(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
               >
-                <option value="Nike Apparel">Nike Apparel</option>
-                <option value="Motif Brand">Motif Brand</option>
-                <option value="Tesco Sri Lanka">Tesco Sri Lanka</option>
-                <option value="Adidas Sportswear">Adidas Sportswear</option>
+                <option value="">All Clients</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
 
-            <div className="col-span-2">
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Style *</label>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                Embroidery Style *
+              </label>
               <select
-                value={formStyle}
-                onChange={(e) => setFormStyle(e.target.value)}
+                value={formStyleId}
+                onChange={(e) => setFormStyleId(e.target.value)}
+                required
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
               >
-                {stylesMaster.map((sm) => (
-                  <option key={sm.name} value={sm.name}>
-                    {sm.name}
-                  </option>
-                ))}
+                {availableStyles.length === 0 ? (
+                  <option value="">No styles available</option>
+                ) : (
+                  availableStyles.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.style_name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Start Hour</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Start Hour *</label>
               <select
                 value={formStartTime}
                 onChange={(e) => setFormStartTime(e.target.value)}
@@ -512,7 +435,7 @@ export default function QualityPage() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">End Hour</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">End Hour *</label>
               <select
                 value={formEndTime}
                 onChange={(e) => setFormEndTime(e.target.value)}
@@ -528,13 +451,14 @@ export default function QualityPage() {
 
             <div>
               <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                Plan Checking Target
+                Inspection Target (Pcs) *
               </label>
               <input
                 type="number"
                 value={formQty}
                 onChange={(e) => setFormQty(parseInt(e.target.value) || 0)}
                 required
+                min={1}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-black text-persian-800 outline-none"
               />
             </div>
@@ -542,24 +466,25 @@ export default function QualityPage() {
             <div>
               <button
                 type="submit"
-                className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs p-2.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                disabled={isSubmitting || availableStyles.length === 0}
+                className="w-full bg-persian-800 hover:bg-persian-700 disabled:bg-slate-300 text-white font-bold text-xs p-2.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
               >
                 <Share2 className="w-3.5 h-3.5" />
-                <span>Assign Block</span>
+                <span>{isSubmitting ? 'Saving...' : 'Push to QC Table'}</span>
               </button>
             </div>
           </div>
         </form>
       </section>
 
-      {/* 8 Checkers Gantt Timeline Matrix */}
+      {/* Main Checker Timeline Matrix */}
       <section className="bg-white border border-slate-200 rounded-3xl shadow-soft overflow-hidden flex flex-col">
-        {/* Header */}
+        {/* Timeline Hours Header */}
         <div className="flex border-b border-slate-200 bg-slate-50 font-semibold text-[11px] text-slate-600 sticky top-0 z-20">
-          <div className="w-64 p-3 bg-slate-100 border-r border-slate-300 font-bold text-persian-800 uppercase tracking-wider flex items-center justify-between shrink-0">
-            <span>Quality Staff (8)</span>
+          <div className="w-72 sm:w-80 p-3 bg-slate-100 border-r border-slate-300 font-bold text-persian-800 uppercase tracking-wider flex items-center justify-between shrink-0">
+            <span>Inspection Table & Auditor</span>
             <span className="text-[9px] bg-white px-2 py-0.5 rounded border border-slate-300 font-mono text-slate-500">
-              Checking Crew
+              {DEFAULT_STATIONS.length} Stations
             </span>
           </div>
 
@@ -574,91 +499,91 @@ export default function QualityPage() {
         </div>
 
         {/* Checker Rows */}
-        <div className="divide-y divide-slate-200 max-h-[600px] overflow-y-auto">
-          {checkers.map((checker) => {
-            let checkerPlan = 0;
-            let checkerActual = 0;
-            checker.styles.forEach((s) => {
-              checkerPlan += s.plan;
-              checkerActual += s.actual;
-            });
-
-            const compPct = checkerPlan > 0 ? Math.round((checkerActual / checkerPlan) * 100) : 0;
+        <div className="divide-y divide-slate-200 max-h-[650px] overflow-y-auto">
+          {DEFAULT_STATIONS.map((stationName) => {
+            const rowAssignments = assignmentsByChecker[stationName] || [];
+            const planTotal = rowAssignments.reduce((acc, a) => acc + a.plan_qty, 0);
+            const actualTotal = rowAssignments.reduce((acc, a) => acc + a.actual_qty, 0);
+            const compPct = planTotal > 0 ? Math.round((actualTotal / planTotal) * 100) : 0;
 
             return (
-              <div
-                key={checker.id}
-                className="flex items-stretch hover:bg-slate-50/70 transition-colors"
-              >
-                {/* Left Staff Info */}
-                <div className="w-64 p-3 bg-white border-r border-slate-300 flex flex-col justify-between shrink-0">
+              <div key={stationName} className="flex items-stretch hover:bg-slate-50/70 transition-colors">
+                <div className="w-72 sm:w-80 p-3 bg-white border-r border-slate-300 flex flex-col justify-between shrink-0">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-black text-slate-900 text-xs">{checker.id}</span>
-                    <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded-full border border-emerald-300">
-                      Active
+                    <span className="font-black text-slate-900 text-xs">{stationName}</span>
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ACTIVE
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mt-2">
-                    <span>
-                      Done: <strong className="text-slate-800">{checkerActual}</strong>/{checkerPlan}
-                    </span>
-                    <span
-                      className={
-                        compPct >= 100 ? 'text-emerald-600 font-bold' : 'text-slate-600'
-                      }
-                    >
-                      {compPct}%
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1 border border-slate-200">
-                    <div
-                      className="bg-emerald-600 h-full rounded-full"
-                      style={{ width: `${Math.min(compPct, 100)}%` }}
-                    />
+                  <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="font-bold text-slate-500">Inspected Output:</span>
+                      <span className="font-black text-persian-800">
+                        {actualTotal} / {planTotal} ({compPct}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-persian-600 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, compPct)}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Right Matrix Blocks */}
-                <div className="flex-1 grid grid-cols-11 relative matrix-grid p-2 gap-2 items-center">
-                  {checker.styles.map((block) => {
-                    const cStyle =
-                      CLIENT_STYLES[block.client] || CLIENT_STYLES['Nike Apparel'];
+                <div className="flex-1 grid grid-cols-11 p-2 gap-1.5 relative bg-slate-50/40">
+                  <div className="absolute inset-0 grid grid-cols-11 divide-x divide-slate-100 pointer-events-none" />
 
-                    return (
-                      <div
-                        key={block.id}
-                        style={{
-                          gridColumn: `${block.startCol} / span ${block.span}`,
-                        }}
-                        onClick={() => openEditModal(checker.id, block.id)}
-                        className={`${cStyle.bg} ${cStyle.border} border rounded-xl p-2.5 shadow-2xs hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span
-                            className={`text-[9px] font-black uppercase tracking-wider ${cStyle.text}`}
-                          >
-                            {block.client}
-                          </span>
-                          <span className="text-[9px] bg-white/90 text-slate-600 px-1 rounded font-bold opacity-0 group-hover:opacity-100 transition-opacity">
-                            Edit
-                          </span>
-                        </div>
+                  {rowAssignments.length === 0 ? (
+                    <div className="col-span-11 flex items-center justify-center text-[11px] text-slate-400 font-medium italic">
+                      No inspection slots scheduled for this station today
+                    </div>
+                  ) : (
+                    rowAssignments.map((block) => {
+                      const start = Math.max(1, Math.min(11, block.start_hour));
+                      const span = Math.max(1, Math.min(11 - start + 1, block.span_hours));
+                      const blockPct =
+                        block.plan_qty > 0
+                          ? Math.round((block.actual_qty / block.plan_qty) * 100)
+                          : 0;
 
-                        <div className="font-black text-slate-800 text-[11px] truncate mb-1">
-                          {block.style}
-                        </div>
+                      return (
+                        <div
+                          key={block.id}
+                          style={{
+                            gridColumnStart: start,
+                            gridColumnEnd: `span ${span}`,
+                          }}
+                          onClick={() => openEditModal(block)}
+                          className="z-10 group cursor-pointer relative bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl p-2 shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden"
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <div className="min-w-0">
+                              <span className="text-[8px] font-black uppercase text-white bg-emerald-700 px-1 py-0.2 rounded truncate block w-fit mb-0.5">
+                                {block.client_name}
+                              </span>
+                              <h6 className="font-black text-[11px] truncate leading-tight">
+                                {block.style_name}
+                              </h6>
+                            </div>
+                            <span className="text-[9px] font-extrabold text-emerald-900 bg-white/80 px-1.5 py-0.5 rounded border border-emerald-200">
+                              {blockPct}%
+                            </span>
+                          </div>
 
-                        <div className="flex items-center justify-between text-[10px] font-bold">
-                          <span className="text-slate-600">Plan: {block.plan}</span>
-                          <span className="bg-persian-800 text-white px-2 py-0.5 rounded text-[10px] shadow-xs">
-                            Act: {block.actual}
-                          </span>
+                          <div className="mt-2 pt-1 border-t border-emerald-200/60 flex items-center justify-between text-[10px]">
+                            <span className="font-bold">
+                              Passed: <span className="font-black text-emerald-900">{block.actual_qty}</span>
+                            </span>
+                            <span className="text-slate-500 font-semibold">
+                              Plan: {block.plan_qty}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             );
@@ -666,66 +591,78 @@ export default function QualityPage() {
         </div>
       </section>
 
-      {/* Edit Modal */}
+      {/* Edit Actual Quantity Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-persian-800 text-white p-4 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h4 className="font-black text-sm flex items-center gap-1.5">
-                  <Edit2 className="w-4 h-4 text-amber-400" />
-                  <span>Update Checking Actuals</span>
+                <h4 className="font-black text-sm uppercase text-slate-800">
+                  Update QC Inspected Pieces
                 </h4>
-                <p className="text-[11px] text-blue-200 mt-0.5">{activeCheckerId}</p>
+                <p className="text-xs text-slate-500">{editStyleName}</p>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="w-7 h-7 rounded-lg bg-persian-900/50 text-blue-200 hover:text-white flex items-center justify-center"
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Plan Checking Qty
-                  </label>
-                  <input
-                    type="number"
-                    value={editPlanQty}
-                    onChange={(e) => setEditPlanQty(parseInt(e.target.value) || 0)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-black text-persian-800 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-emerald-700 mb-1">
-                    Actual Done Qty
-                  </label>
-                  <input
-                    type="number"
-                    value={editActualQty}
-                    onChange={(e) => setEditActualQty(parseInt(e.target.value) || 0)}
-                    className="w-full bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs font-black text-emerald-800 outline-none"
-                  />
-                </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">
+                  Plan Inspection Target
+                </label>
+                <input
+                  type="number"
+                  value={editPlanQty}
+                  disabled
+                  className="w-full bg-slate-100 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-600"
+                />
               </div>
 
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Passed / Inspected Quantity *
+                </label>
+                <input
+                  type="number"
+                  value={editActualQty}
+                  onChange={(e) => setEditActualQty(parseInt(e.target.value) || 0)}
+                  min={0}
+                  className="w-full bg-white border-2 border-persian-500 rounded-xl p-2.5 text-sm font-black text-slate-900 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleDeleteAssignment}
+                disabled={isUpdating}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold text-xs transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete Block</span>
+              </button>
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={deleteBlock}
-                  className="w-1/3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition-colors"
+                  onClick={() => setModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-50"
                 >
-                  Delete
+                  Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={updateBlock}
-                  className="w-2/3 py-2.5 rounded-xl bg-persian-800 hover:bg-persian-700 text-white font-bold text-xs shadow-md transition-all"
+                  onClick={handleUpdateActual}
+                  disabled={isUpdating}
+                  className="px-4 py-2 bg-persian-800 hover:bg-persian-700 text-white rounded-xl font-bold text-xs shadow-md"
                 >
-                  Update & Save
+                  {isUpdating ? 'Saving...' : 'Save QC Count'}
                 </button>
               </div>
             </div>

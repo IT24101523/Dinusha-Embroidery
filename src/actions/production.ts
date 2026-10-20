@@ -1,13 +1,39 @@
 'use server';
 
-import { db } from '@/db';
-import { machines, clients, styles, productionAssignments } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
-export interface ClientStyle {
+export interface ProductionScheduleItem {
+  id: string;
+  machine_id: string;
+  style_id: string;
+  assignment_date: string;
+  start_hour: number;
+  span_hours: number;
+  plan_qty: number;
+  actual_qty: number;
+  machine?: {
+    id: string;
+    machine_number: number;
+    machine_name: string;
+    status: string;
+    operator_name: string | null;
+    helper_name: string | null;
+  };
+  style?: {
+    id: string;
+    style_name: string;
+    target_per_hour: number | null;
+    client?: {
+      id: string;
+      name: string;
+    };
+  };
+}
+
+export interface MachineStyleBlock {
+  styleName: string;
   clientName: string;
   clientColorScheme: string;
-  styleName: string;
   startHour: number;
   spanHours: number;
   planQty: number;
@@ -18,16 +44,17 @@ export interface MachineWithAssignments {
   id: string;
   machineNumber: number;
   machineName: string;
+  brand: string | null;
   status: string;
   operatorName: string | null;
   helperName: string | null;
-  styles: ClientStyle[];
+  styles: MachineStyleBlock[];
 }
 
 export interface StyleAggregate {
+  styleName: string;
   clientName: string;
   clientColorScheme: string;
-  styleName: string;
   totalPlan: number;
   totalActual: number;
 }
@@ -35,193 +62,76 @@ export interface StyleAggregate {
 export interface ProductionDashboardData {
   machines: MachineWithAssignments[];
   styleAggregates: StyleAggregate[];
+  dateStr: string;
   totalPlan: number;
   totalActual: number;
   activeMachineCount: number;
 }
 
-export async function getProductionDashboardData(
-  dateStr?: string
-): Promise<ProductionDashboardData> {
+export async function fetchProductionSchedule(dateStr?: string): Promise<ProductionScheduleItem[]> {
   const targetDate = dateStr || new Date().toISOString().split('T')[0];
 
-  try {
-    const allMachines = await db
-      .select()
-      .from(machines)
-      .where(eq(machines.isActive, true))
-      .orderBy(machines.machineNumber);
+  const { data, error } = await supabaseAdmin
+    .from('production_assignments')
+    .select('*, machine:machines(*), style:styles(*, client:clients(*))')
+    .eq('assignment_date', targetDate)
+    .order('start_hour', { ascending: true });
 
-    const assignments = await db
-      .select({
-        assignmentId: productionAssignments.id,
-        machineId: productionAssignments.machineId,
-        startHour: productionAssignments.startHour,
-        spanHours: productionAssignments.spanHours,
-        planQty: productionAssignments.planQty,
-        actualQty: productionAssignments.actualQty,
-        styleName: styles.styleName,
-        clientName: clients.name,
-        clientColorScheme: clients.colorScheme,
-      })
-      .from(productionAssignments)
-      .innerJoin(styles, eq(productionAssignments.styleId, styles.id))
-      .innerJoin(clients, eq(styles.clientId, clients.id))
-      .where(eq(productionAssignments.assignmentDate, targetDate));
-
-    const assignmentsByMachine = new Map<string, ClientStyle[]>();
-    const styleAggMap = new Map<string, StyleAggregate>();
-
-    let totalPlan = 0;
-    let totalActual = 0;
-
-    for (const a of assignments) {
-      const machineStyles = assignmentsByMachine.get(a.machineId) || [];
-      machineStyles.push({
-        clientName: a.clientName,
-        clientColorScheme: a.clientColorScheme,
-        styleName: a.styleName,
-        startHour: a.startHour,
-        spanHours: a.spanHours,
-        planQty: a.planQty,
-        actualQty: a.actualQty,
-      });
-      assignmentsByMachine.set(a.machineId, machineStyles);
-
-      totalPlan += a.planQty;
-      totalActual += a.actualQty;
-
-      const key = `${a.clientName} - ${a.styleName}`;
-      const existing = styleAggMap.get(key);
-      if (existing) {
-        existing.totalPlan += a.planQty;
-        existing.totalActual += a.actualQty;
-      } else {
-        styleAggMap.set(key, {
-          clientName: a.clientName,
-          clientColorScheme: a.clientColorScheme,
-          styleName: a.styleName,
-          totalPlan: a.planQty,
-          totalActual: a.actualQty,
-        });
-      }
-    }
-
-    const machinesWithAssignments: MachineWithAssignments[] = allMachines.map((m) => ({
-      id: m.id,
-      machineNumber: m.machineNumber,
-      machineName: m.machineName,
-      status: m.status,
-      operatorName: m.operatorName,
-      helperName: m.helperName,
-      styles: assignmentsByMachine.get(m.id) || [],
-    }));
-
-    const activeMachineCount = allMachines.filter(
-      (m) => m.status === 'RUNNING' || m.status === 'SETUP'
-    ).length;
-
-    return {
-      machines: machinesWithAssignments,
-      styleAggregates: Array.from(styleAggMap.values()),
-      totalPlan,
-      totalActual,
-      activeMachineCount,
-    };
-  } catch (error) {
-    console.warn('Database query failed or not yet seeded, using live factory fallback layout:', error);
-    return getFallbackFactoryData();
+  if (error) {
+    console.error('fetchProductionSchedule error:', error);
+    return [];
   }
+
+  return data || [];
 }
 
-function getFallbackFactoryData(): ProductionDashboardData {
-  const operators = ['Nimal', 'Kamal', 'Sunil', 'Bandara', 'Ruwan', 'Nuwan', 'Chathura', 'Dhammika', 'Mahesh', 'Asanka', 'Kasun', 'Tharindu', 'Saman'];
-  const helpers = ['Priyanta', 'Lalith', 'Dinesh', 'Sanjeeva', 'Anura', 'Indika', 'Janaka', 'Gayan', 'Roshan', 'Upul', 'Priyantha', 'Sujith', 'Buddhika'];
+export async function createProductionAssignment(payload: {
+  machine_id: string;
+  style_id: string;
+  assignment_date: string;
+  start_hour: number;
+  span_hours: number;
+  plan_qty: number;
+  actual_qty?: number;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from('production_assignments')
+    .insert([
+      {
+        machine_id: payload.machine_id,
+        style_id: payload.style_id,
+        assignment_date: payload.assignment_date,
+        start_hour: payload.start_hour,
+        span_hours: payload.span_hours,
+        plan_qty: payload.plan_qty,
+        actual_qty: payload.actual_qty || 0,
+      },
+    ])
+    .select()
+    .single();
 
-  const stylesPool = [
-    { client: 'Nike Apparel', color: 'indigo', style: 'Track Jacket Logo #102', plan: 350, actual: 285 },
-    { client: 'Motif Brand', color: 'amber', style: 'Chest Badge #88', plan: 300, actual: 210 },
-    { client: 'Tesco Sri Lanka', color: 'emerald', style: 'Floral Embroidery #502', plan: 280, actual: 240 },
-    { client: 'Adidas Sportswear', color: 'purple', style: 'Back Crest Embroidery #301', plan: 310, actual: 295 },
-  ];
+  if (error) throw new Error(error.message);
+  return data;
+}
 
-  const styleAggMap = new Map<string, StyleAggregate>();
-  let totalPlan = 0;
-  let totalActual = 0;
+export async function updateProductionActualQty(id: string, actual_qty: number) {
+  const { data, error } = await supabaseAdmin
+    .from('production_assignments')
+    .update({ actual_qty })
+    .eq('id', id)
+    .select()
+    .single();
 
-  const machinesList: MachineWithAssignments[] = Array.from({ length: 13 }, (_, i) => {
-    const num = (i + 1).toString().padStart(2, '0');
-    let status = 'RUNNING';
-    if (i === 5) status = 'SETUP';
-    if (i === 11) status = 'MAINTENANCE';
+  if (error) throw new Error(error.message);
+  return data;
+}
 
-    if (i === 1) {
-      const s1 = { clientName: 'Nike Apparel', clientColorScheme: 'indigo', styleName: 'Track Jacket Logo #102', startHour: 8, spanHours: 6, planQty: 180, actualQty: 165 };
-      const s2 = { clientName: 'Motif Brand', clientColorScheme: 'amber', styleName: 'Chest Badge #88', startHour: 14, spanHours: 5, planQty: 170, actualQty: 120 };
+export async function deleteProductionAssignment(id: string) {
+  const { error } = await supabaseAdmin
+    .from('production_assignments')
+    .delete()
+    .eq('id', id);
 
-      [s1, s2].forEach((s) => {
-        totalPlan += s.planQty;
-        totalActual += s.actualQty;
-        const key = `${s.clientName} - ${s.styleName}`;
-        const ex = styleAggMap.get(key);
-        if (ex) {
-          ex.totalPlan += s.planQty;
-          ex.totalActual += s.actualQty;
-        } else {
-          styleAggMap.set(key, { clientName: s.clientName, clientColorScheme: s.clientColorScheme, styleName: s.styleName, totalPlan: s.planQty, totalActual: s.actualQty });
-        }
-      });
-
-      return {
-        id: `m-${i + 1}`,
-        machineNumber: i + 1,
-        machineName: `Machine ${num}`,
-        status,
-        operatorName: operators[i],
-        helperName: helpers[i],
-        styles: [s1, s2],
-      };
-    }
-
-    const assigned = stylesPool[i % stylesPool.length];
-    const s = {
-      clientName: assigned.client,
-      clientColorScheme: assigned.color,
-      styleName: assigned.style,
-      startHour: 8,
-      spanHours: 11,
-      planQty: assigned.plan,
-      actualQty: assigned.actual,
-    };
-
-    totalPlan += s.planQty;
-    totalActual += s.actualQty;
-
-    const key = `${s.clientName} - ${s.styleName}`;
-    const ex = styleAggMap.get(key);
-    if (ex) {
-      ex.totalPlan += s.planQty;
-      ex.totalActual += s.actualQty;
-    } else {
-      styleAggMap.set(key, { clientName: s.clientName, clientColorScheme: s.clientColorScheme, styleName: s.styleName, totalPlan: s.planQty, totalActual: s.actualQty });
-    }
-
-    return {
-      id: `m-${i + 1}`,
-      machineNumber: i + 1,
-      machineName: `Machine ${num}`,
-      status,
-      operatorName: operators[i],
-      helperName: helpers[i],
-      styles: [s],
-    };
-  });
-
-  return {
-    machines: machinesList,
-    styleAggregates: Array.from(styleAggMap.values()),
-    totalPlan,
-    totalActual,
-    activeMachineCount: 12,
-  };
+  if (error) throw new Error(error.message);
+  return true;
 }

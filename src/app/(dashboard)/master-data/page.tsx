@@ -17,7 +17,23 @@ import {
   Layers,
   ArrowLeft,
   X,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
+import {
+  fetchDbMachines,
+  fetchDbClients,
+  fetchDbStyles,
+  createDbMachine,
+  deleteDbMachine,
+  createDbClient,
+  deleteDbClient,
+  createDbStyle,
+  deleteDbStyle,
+  type DbMachine,
+  type DbClient,
+  type DbStyle,
+} from '@/actions/master-data';
 
 interface ThreadRow {
   color: string;
@@ -46,24 +62,6 @@ interface MasterStyle {
   price: number;
   qty: number;
   parts: PartItem[];
-}
-
-interface Company {
-  id: string;
-  name: string;
-  contact: string;
-  email: string;
-  phone: string;
-}
-
-interface Machine {
-  id: string;
-  name: string;
-  heads: number;
-  speed: number;
-  brand: string;
-  types: string[];
-  status: 'Active' | 'Maintenance';
 }
 
 const DROPDOWNS = {
@@ -96,17 +94,17 @@ const DROPDOWNS = {
 
 export default function MasterDataPage() {
   const [activeTab, setActiveTab] = useState<'styles' | 'companies' | 'machines' | 'sheet'>('styles');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Master Data State
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
+  // Real Database State (Starts completely empty)
+  const [companies, setCompanies] = useState<DbClient[]>([]);
+  const [machines, setMachines] = useState<DbMachine[]>([]);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [selectedStyleForSheet, setSelectedStyleForSheet] = useState<MasterStyle | null>(null);
 
   // Style Form Draft State
-  const [editingStyleId, setEditingStyleId] = useState<string | null>(null);
   const [styleCode, setStyleCode] = useState('');
-  const [styleCompany, setStyleCompany] = useState('Nike Apparel');
+  const [selectedClientId, setSelectedClientId] = useState('');
   const [styleName, setStyleName] = useState('');
   const [styleFabric, setStyleFabric] = useState('White');
   const [styleTarget, setStyleTarget] = useState(20);
@@ -119,156 +117,74 @@ export default function MasterDataPage() {
       qty: 1,
       backing: 'Tearaway (Standard)',
       needle: 'DBxK5 75/11',
-      threads: [{ color: 'Navy', shade: '1842', brand: 'Madeira', mLen: 45, cLen: 5000 }],
+      threads: [{ color: '', shade: '', brand: 'Madeira', mLen: 0, cLen: 5000 }],
     },
   ]);
 
   // Company Form State
   const [compName, setCompName] = useState('');
-  const [compContact, setCompContact] = useState('');
-  const [compEmail, setCompEmail] = useState('');
-  const [compPhone, setCompPhone] = useState('');
-  const [editingCompId, setEditingCompId] = useState<string | null>(null);
+  const [compColorScheme, setCompColorScheme] = useState('indigo');
 
   // Machine Form State
+  const [machNumber, setMachNumber] = useState<number>(1);
   const [machName, setMachName] = useState('');
   const [machHeads, setMachHeads] = useState(15);
   const [machSpeed, setMachSpeed] = useState(1000);
   const [machBrand, setMachBrand] = useState('Tajima');
-  const [machTypes, setMachTypes] = useState<string[]>(['Normal']);
-  const [machStatus, setMachStatus] = useState<'Active' | 'Maintenance'>('Active');
-  const [editingMachId, setEditingMachId] = useState<string | null>(null);
+  const [machStatus, setMachStatus] = useState<'RUNNING' | 'SETUP' | 'MAINTENANCE' | 'IDLE'>('IDLE');
 
-  // Initial Load from localStorage or seeds
-  useEffect(() => {
-    const savedComps = localStorage.getItem('dinusha_companies_master');
-    if (savedComps) {
-      setCompanies(JSON.parse(savedComps));
-    } else {
-      const initialComps: Company[] = [
-        { id: 'c1', name: 'Nike Apparel', contact: 'John Doe', email: 'john@nike.lk', phone: '011 234 5678' },
-        { id: 'c2', name: 'Motif Brand', contact: 'Kamal Perera', email: 'kamal@motifstyles.com', phone: '077 345 6789' },
-        { id: 'c3', name: 'Tesco Sri Lanka', contact: 'Sarah Jenkins', email: 'sarah.j@tesco.lk', phone: '011 555 4321' },
-        { id: 'c4', name: 'Adidas Sportswear', contact: 'Mark Evans', email: 'mark@adidas.com', phone: '071 888 9900' },
-      ];
-      setCompanies(initialComps);
-      localStorage.setItem('dinusha_companies_master', JSON.stringify(initialComps));
-    }
+  // Load Real Data from Supabase
+  const loadDatabaseData = async () => {
+    setIsLoading(true);
+    try {
+      const [dbMachs, dbClis, dbStys] = await Promise.all([
+        fetchDbMachines(),
+        fetchDbClients(),
+        fetchDbStyles(),
+      ]);
 
-    const savedMachs = localStorage.getItem('dinusha_machines_v2');
-    if (savedMachs) {
-      setMachines(JSON.parse(savedMachs));
-    } else {
-      const initialMachs: Machine[] = Array.from({ length: 13 }, (_, i) => ({
-        id: `m-${i + 1}`,
-        name: `Machine ${(i + 1).toString().padStart(2, '0')}`,
-        heads: i % 2 === 0 ? 15 : 20,
-        speed: 1000,
-        brand: i === 1 ? 'Barudan' : 'Tajima',
-        types: i % 3 === 0 ? ['Normal', 'Sequence'] : ['Normal'],
-        status: 'Active',
+      setMachines(dbMachs);
+      setCompanies(dbClis);
+
+      if (dbClis.length > 0 && !selectedClientId) {
+        setSelectedClientId(dbClis[0].id);
+      }
+
+      // Map DB styles to UI format
+      const mappedStyles: MasterStyle[] = dbStys.map((s) => ({
+        id: s.id,
+        code: s.style_name.split(' ')[0] || s.id.slice(0, 6).toUpperCase(),
+        company: s.client?.name || 'Unassigned',
+        name: s.style_name,
+        fabric: 'Standard',
+        target: s.target_per_hour || 20,
+        currency: 'LKR',
+        price: 150,
+        qty: 1000,
+        parts: [
+          {
+            name: 'Main Artwork',
+            qty: 1,
+            backing: 'Tearaway (Standard)',
+            needle: 'DBxK5 75/11',
+            threads: [{ color: 'Primary', shade: '1001', brand: 'Madeira', mLen: 25, cLen: 5000 }],
+          },
+        ],
       }));
-      setMachines(initialMachs);
-      localStorage.setItem('dinusha_machines_v2', JSON.stringify(initialMachs));
-    }
 
-    const savedStyles = localStorage.getItem('dinusha_styles_v3');
-    if (savedStyles) {
-      setStyles(JSON.parse(savedStyles));
-    } else {
-      const initialStyles: MasterStyle[] = [
-        {
-          id: 's-1',
-          code: 'NIK-102',
-          company: 'Nike Apparel',
-          name: 'Track Jacket Logo #102',
-          fabric: 'Navy Blue',
-          target: 20,
-          currency: 'USD',
-          price: 1.2,
-          qty: 2000,
-          parts: [
-            {
-              name: 'Chest Swoosh',
-              qty: 1,
-              backing: 'Tearaway (Standard)',
-              needle: 'DBxK5 75/11',
-              threads: [
-                { color: 'White', shade: '1801', brand: 'Madeira', mLen: 38.5, cLen: 5000 },
-                { color: 'Silver', shade: '1918', brand: 'Madeira', mLen: 12.0, cLen: 5000 },
-              ],
-            },
-          ],
-        },
-        {
-          id: 's-2',
-          code: 'MOT-088',
-          company: 'Motif Brand',
-          name: 'Chest Badge #88',
-          fabric: 'Black',
-          target: 25,
-          currency: 'LKR',
-          price: 150.0,
-          qty: 1500,
-          parts: [
-            {
-              name: 'Badge Center',
-              qty: 1,
-              backing: 'Cutaway (Standard)',
-              needle: 'DBxK5 75/11',
-              threads: [
-                { color: 'Gold', shade: '1725', brand: 'Gunold', mLen: 52.0, cLen: 3000 },
-                { color: 'Red', shade: '1637', brand: 'Madeira', mLen: 18.0, cLen: 5000 },
-              ],
-            },
-          ],
-        },
-        {
-          id: 's-3',
-          code: 'TES-502',
-          company: 'Tesco Sri Lanka',
-          name: 'Floral Embroidery #502',
-          fabric: 'White',
-          target: 18,
-          currency: 'GBP',
-          price: 0.85,
-          qty: 1800,
-          parts: [
-            {
-              name: 'Floral Petals',
-              qty: 2,
-              backing: 'Tearaway (Standard)',
-              needle: 'DBxK5 65/9',
-              threads: [
-                { color: 'Pink', shade: '1815', brand: 'Madeira', mLen: 42.0, cLen: 5000 },
-                { color: 'Leaf Green', shade: '1902', brand: 'Madeira', mLen: 28.5, cLen: 5000 },
-              ],
-            },
-          ],
-        },
-      ];
-      setStyles(initialStyles);
-      localStorage.setItem('dinusha_styles_v3', JSON.stringify(initialStyles));
+      setStyles(mappedStyles);
+    } catch (err) {
+      console.error('Error loading Supabase master data:', err);
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadDatabaseData();
   }, []);
 
-  // Save Handlers
-  const persistStyles = (updated: MasterStyle[]) => {
-    setStyles(updated);
-    localStorage.setItem('dinusha_styles_v3', JSON.stringify(updated));
-  };
-
-  const persistCompanies = (updated: Company[]) => {
-    setCompanies(updated);
-    localStorage.setItem('dinusha_companies_master', JSON.stringify(updated));
-  };
-
-  const persistMachines = (updated: Machine[]) => {
-    setMachines(updated);
-    localStorage.setItem('dinusha_machines_v2', JSON.stringify(updated));
-  };
-
-  // Parts Builder Operations
+  // Parts Builder
   const addPart = () => {
     setDraftParts([
       ...draftParts,
@@ -316,135 +232,99 @@ export default function MasterDataPage() {
     setDraftParts(updated);
   };
 
-  // Style Submit
-  const handleStyleSubmit = (e: React.FormEvent) => {
+  // Submit Style directly to Supabase
+  const handleStyleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!styleCode || !styleName) {
-      alert('Please fill in Style Code and Style Name.');
-      return;
-    }
-    if (draftParts.length === 0) {
-      alert('Please add at least one garment part.');
+    if (!styleName || !selectedClientId) {
+      alert('Please fill in Style Name and select a Client Company.');
       return;
     }
 
-    const newStyle: MasterStyle = {
-      id: editingStyleId || `s-${Date.now()}`,
-      code: styleCode,
-      company: styleCompany,
-      name: styleName,
-      fabric: styleFabric,
-      target: styleTarget,
-      currency: styleCurrency,
-      price: stylePrice,
-      qty: styleQty,
-      parts: draftParts,
-    };
+    try {
+      await createDbStyle({
+        client_id: selectedClientId,
+        style_name: styleCode ? `${styleCode} - ${styleName}` : styleName,
+        target_per_hour: styleTarget,
+      });
 
-    if (editingStyleId) {
-      persistStyles(styles.map((s) => (s.id === editingStyleId ? newStyle : s)));
-    } else {
-      persistStyles([newStyle, ...styles]);
-    }
-
-    resetStyleForm();
-  };
-
-  const editStyle = (style: MasterStyle) => {
-    setEditingStyleId(style.id);
-    setStyleCode(style.code);
-    setStyleCompany(style.company);
-    setStyleName(style.name);
-    setStyleFabric(style.fabric);
-    setStyleTarget(style.target);
-    setStyleCurrency(style.currency);
-    setStylePrice(style.price);
-    setStyleQty(style.qty);
-    setDraftParts(JSON.parse(JSON.stringify(style.parts)));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const deleteStyle = (id: string) => {
-    if (confirm('Are you sure you want to delete this master style?')) {
-      persistStyles(styles.filter((s) => s.id !== id));
+      setStyleCode('');
+      setStyleName('');
+      await loadDatabaseData();
+    } catch (err: any) {
+      alert(`Error saving style to database: ${err.message}`);
     }
   };
 
-  const resetStyleForm = () => {
-    setEditingStyleId(null);
-    setStyleCode('');
-    setStyleName('');
-    setStyleFabric('White');
-    setStylePrice(150.0);
-    setStyleTarget(20);
-    setDraftParts([
-      {
-        name: 'Front Logo',
-        qty: 1,
-        backing: 'Tearaway (Standard)',
-        needle: 'DBxK5 75/11',
-        threads: [{ color: '', shade: '', brand: 'Madeira', mLen: 0, cLen: 5000 }],
-      },
-    ]);
+  const handleDeleteStyle = async (id: string) => {
+    if (confirm('Delete this style from Supabase database?')) {
+      try {
+        await deleteDbStyle(id);
+        await loadDatabaseData();
+      } catch (err: any) {
+        alert(err.message);
+      }
+    }
   };
 
-  // Company Submit
-  const handleCompanySubmit = (e: React.FormEvent) => {
+  // Submit Client directly to Supabase
+  const handleCompanySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!compName) return;
 
-    const companyData: Company = {
-      id: editingCompId || `c-${Date.now()}`,
-      name: compName,
-      contact: compContact,
-      email: compEmail,
-      phone: compPhone,
-    };
-
-    if (editingCompId) {
-      persistCompanies(companies.map((c) => (c.id === editingCompId ? companyData : c)));
-    } else {
-      persistCompanies([...companies, companyData]);
+    try {
+      await createDbClient(compName, compColorScheme);
+      setCompName('');
+      await loadDatabaseData();
+    } catch (err: any) {
+      alert(`Error saving client to database: ${err.message}`);
     }
-
-    setEditingCompId(null);
-    setCompName('');
-    setCompContact('');
-    setCompEmail('');
-    setCompPhone('');
   };
 
-  // Machine Submit
-  const handleMachineSubmit = (e: React.FormEvent) => {
+  const handleDeleteClient = async (id: string) => {
+    if (confirm('Delete this client from Supabase database?')) {
+      try {
+        await deleteDbClient(id);
+        await loadDatabaseData();
+      } catch (err: any) {
+        alert(err.message);
+      }
+    }
+  };
+
+  // Submit Machine directly to Supabase
+  const handleMachineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!machName) return;
 
-    const machineData: Machine = {
-      id: editingMachId || `m-${Date.now()}`,
-      name: machName,
-      heads: machHeads,
-      speed: machSpeed,
-      brand: machBrand,
-      types: machTypes.length > 0 ? machTypes : ['Normal'],
-      status: machStatus,
-    };
+    try {
+      await createDbMachine({
+        machine_number: machNumber,
+        machine_name: machName,
+        brand: machBrand,
+        heads: machHeads,
+        speed: machSpeed,
+        status: machStatus,
+      });
 
-    if (editingMachId) {
-      persistMachines(machines.map((m) => (m.id === editingMachId ? machineData : m)));
-    } else {
-      persistMachines([...machines, machineData]);
+      setMachNumber(machNumber + 1);
+      setMachName('');
+      await loadDatabaseData();
+    } catch (err: any) {
+      alert(`Error saving machine to database: ${err.message}`);
     }
-
-    setEditingMachId(null);
-    setMachName('');
-    setMachHeads(15);
-    setMachSpeed(1000);
-    setMachBrand('Tajima');
-    setMachTypes(['Normal']);
-    setMachStatus('Active');
   };
 
-  // Print Strike-Off Sheet
+  const handleDeleteMachine = async (id: string) => {
+    if (confirm('Delete this machine from Supabase database?')) {
+      try {
+        await deleteDbMachine(id);
+        await loadDatabaseData();
+      } catch (err: any) {
+        alert(err.message);
+      }
+    }
+  };
+
   const openStrikeOffSheet = (style: MasterStyle) => {
     setSelectedStyleForSheet(style);
     setActiveTab('sheet');
@@ -452,20 +332,20 @@ export default function MasterDataPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top Tab Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xs no-print">
+      {/* Live DB Sync Status Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs no-print">
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setActiveTab('styles')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'styles'
-                ? 'bg-persian-800 text-white shadow-md shadow-persian-800/20'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-persian-800 text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Shirt className="w-4 h-4" />
-            <span>Style & Parts Master</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20">
+            <span>Styles Master</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 font-mono">
               {styles.length}
             </span>
           </button>
@@ -474,13 +354,13 @@ export default function MasterDataPage() {
             onClick={() => setActiveTab('companies')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'companies'
-                ? 'bg-persian-800 text-white shadow-md shadow-persian-800/20'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-persian-800 text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Building2 className="w-4 h-4" />
             <span>Clients & Companies</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20">
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 font-mono">
               {companies.length}
             </span>
           </button>
@@ -489,93 +369,86 @@ export default function MasterDataPage() {
             onClick={() => setActiveTab('machines')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'machines'
-                ? 'bg-persian-800 text-white shadow-md shadow-persian-800/20'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-persian-800 text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Cpu className="w-4 h-4" />
-            <span>Machine Fleet</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20">
+            <span>Machines Fleet</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 font-mono">
               {machines.length}
             </span>
           </button>
         </div>
 
-        {selectedStyleForSheet && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setActiveTab('sheet')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'sheet'
-                ? 'bg-emerald-700 text-white shadow-md'
-                : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-            }`}
+            onClick={loadDatabaseData}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Active Strike-Off: {selectedStyleForSheet.code}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Sync DB</span>
           </button>
-        )}
+
+          <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl flex items-center gap-1">
+            <Database className="w-3 h-3 text-emerald-600" />
+            <span>Live Supabase Connected</span>
+          </span>
+        </div>
       </div>
 
       {/* ============================================================== */}
-      {/* 1. STYLES & PARTS TAB */}
+      {/* 1. STYLES MASTER TAB */}
       {/* ============================================================== */}
       {activeTab === 'styles' && (
         <div className="space-y-6">
-          {/* Style Registration / Editor Form */}
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Shirt className="w-5 h-5 text-persian-600" />
-                <h3 className="font-black text-sm uppercase text-slate-800">
-                  {editingStyleId ? 'Edit Master Style Hierarchy' : 'Register Master Style & Parts'}
-                </h3>
-              </div>
-              {editingStyleId && (
-                <button
-                  type="button"
-                  onClick={resetStyleForm}
-                  className="text-xs text-rose-600 hover:underline font-bold"
-                >
-                  Cancel Edit
-                </button>
-              )}
+              <h3 className="font-black text-sm uppercase text-slate-800 flex items-center gap-2">
+                <Shirt className="w-4 h-4 text-persian-600" />
+                <span>Register New Master Style (Saves to Supabase Database)</span>
+              </h3>
             </div>
 
             <form onSubmit={handleStyleSubmit} className="space-y-6">
-              {/* Header Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Style Code *
+                    Client Company *
+                  </label>
+                  <select
+                    value={selectedClientId}
+                    onChange={(e) => setSelectedClientId(e.target.value)}
+                    required
+                    className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold outline-none focus:border-persian-500"
+                  >
+                    {companies.length === 0 ? (
+                      <option value="">No clients found — Add client first</option>
+                    ) : (
+                      companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Style Code / Prefix
                   </label>
                   <input
                     type="text"
                     value={styleCode}
                     onChange={(e) => setStyleCode(e.target.value)}
                     placeholder="e.g. NIK-102"
-                    required
-                    className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-persian-800 outline-none focus:border-persian-500"
+                    className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-persian-800 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Company *
-                  </label>
-                  <select
-                    value={styleCompany}
-                    onChange={(e) => setStyleCompany(e.target.value)}
-                    className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                  >
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="col-span-2">
                   <label className="block text-[10px] font-bold text-slate-600 mb-1">
                     Style Name *
                   </label>
@@ -591,396 +464,93 @@ export default function MasterDataPage() {
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Fabric Color
-                  </label>
-                  <select
-                    value={styleFabric}
-                    onChange={(e) => setStyleFabric(e.target.value)}
-                    className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                  >
-                    {DROPDOWNS.fabrics.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Target/Hr *
+                    Target Pcs / Hour
                   </label>
                   <input
                     type="number"
                     value={styleTarget}
-                    onChange={(e) => setStyleTarget(parseInt(e.target.value) || 0)}
-                    required
+                    onChange={(e) => setStyleTarget(parseInt(e.target.value) || 20)}
                     className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold outline-none"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Currency & Price *
-                  </label>
-                  <div className="flex gap-1">
-                    <select
-                      value={styleCurrency}
-                      onChange={(e) => setStyleCurrency(e.target.value)}
-                      className="w-16 p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold outline-none"
-                    >
-                      {DROPDOWNS.currencies.map((curr) => (
-                        <option key={curr} value={curr}>
-                          {curr}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={stylePrice}
-                      onChange={(e) => setStylePrice(parseFloat(e.target.value) || 0)}
-                      required
-                      className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-black text-emerald-700 outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Order Qty *
-                  </label>
-                  <input
-                    type="number"
-                    value={styleQty}
-                    onChange={(e) => setStyleQty(parseInt(e.target.value) || 0)}
-                    required
-                    className="w-full p-2 bg-white border border-persian-300 rounded-xl text-xs font-black text-persian-800 outline-none"
-                  />
-                </div>
               </div>
 
-              {/* Parts Builder */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-extrabold text-xs uppercase text-slate-700">
-                      Garment Parts & Dynamic Thread Matrices
-                    </h4>
-                    <p className="text-[11px] text-slate-400">
-                      Formula: Required Cones = ((Machine Length × 1.5) × Part Qty × Total Order
-                      Qty) / Cone Size
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addPart}
-                    className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors shadow-2xs"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Garment Part</span>
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {draftParts.map((part, pIdx) => (
-                    <div
-                      key={pIdx}
-                      className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs"
-                    >
-                      {/* Part Top Row */}
-                      <div className="bg-slate-100/80 p-3.5 border-b border-slate-200 flex flex-wrap gap-3 items-end">
-                        <div className="flex-1 min-w-[200px]">
-                          <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
-                            Part Location / Name
-                          </label>
-                          <input
-                            type="text"
-                            value={part.name}
-                            onChange={(e) => updatePartField(pIdx, 'name', e.target.value)}
-                            placeholder="e.g. Front Logo"
-                            className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                          />
-                        </div>
-
-                        <div className="w-24">
-                          <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
-                            Part Qty
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={part.qty}
-                            onChange={(e) =>
-                              updatePartField(pIdx, 'qty', parseInt(e.target.value) || 1)
-                            }
-                            className="w-full p-2 bg-persian-50 border border-persian-200 rounded-xl text-xs font-black text-persian-800 outline-none"
-                          />
-                        </div>
-
-                        <div className="w-48">
-                          <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
-                            Backing Required
-                          </label>
-                          <select
-                            value={part.backing}
-                            onChange={(e) => updatePartField(pIdx, 'backing', e.target.value)}
-                            className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold outline-none"
-                          >
-                            {DROPDOWNS.backings.map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="w-40">
-                          <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
-                            Needle Spec
-                          </label>
-                          <select
-                            value={part.needle}
-                            onChange={(e) => updatePartField(pIdx, 'needle', e.target.value)}
-                            className="w-full p-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold outline-none"
-                          >
-                            {DROPDOWNS.needles.map((n) => (
-                              <option key={n} value={n}>
-                                {n}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removePart(pIdx)}
-                          className="bg-rose-50 text-rose-700 hover:bg-rose-100 p-2.5 rounded-xl border border-rose-200 text-xs font-bold transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* Thread Matrix Table */}
-                      <div className="p-3.5 overflow-x-auto">
-                        <table className="w-full text-left text-xs whitespace-nowrap min-w-[700px]">
-                          <thead className="text-[10px] font-extrabold uppercase text-slate-500 border-b border-slate-200">
-                            <tr>
-                              <th className="p-2 w-1/5">Thread Color</th>
-                              <th className="p-2 w-1/5">Shade #</th>
-                              <th className="p-2 w-1/5">Brand</th>
-                              <th className="p-2 bg-blue-50/70 w-28">Mach. Len (m)</th>
-                              <th className="p-2 bg-blue-50/70 w-28">Cone Size (m)</th>
-                              <th className="p-2 bg-persian-50 text-center w-28 font-bold text-persian-900">
-                                Req. Cones
-                              </th>
-                              <th className="p-2 text-center w-12">Del</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {part.threads.map((thread, tIdx) => {
-                              const reqCones = (
-                                (thread.mLen * 1.5 * part.qty * styleQty) /
-                                (thread.cLen || 5000)
-                              ).toFixed(2);
-
-                              return (
-                                <tr key={tIdx} className="hover:bg-slate-50/70">
-                                  <td className="p-1.5">
-                                    <input
-                                      type="text"
-                                      value={thread.color}
-                                      onChange={(e) =>
-                                        updateThread(pIdx, tIdx, 'color', e.target.value)
-                                      }
-                                      placeholder="Color name"
-                                      className="w-full p-2 border border-slate-200 rounded-lg text-xs"
-                                    />
-                                  </td>
-                                  <td className="p-1.5">
-                                    <input
-                                      type="text"
-                                      value={thread.shade}
-                                      onChange={(e) =>
-                                        updateThread(pIdx, tIdx, 'shade', e.target.value)
-                                      }
-                                      placeholder="Shade #"
-                                      className="w-full p-2 border border-slate-200 rounded-lg text-xs font-mono font-bold"
-                                    />
-                                  </td>
-                                  <td className="p-1.5">
-                                    <select
-                                      value={thread.brand}
-                                      onChange={(e) =>
-                                        updateThread(pIdx, tIdx, 'brand', e.target.value)
-                                      }
-                                      className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                                    >
-                                      {DROPDOWNS.brands.map((b) => (
-                                        <option key={b} value={b}>
-                                          {b}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </td>
-                                  <td className="p-1.5 bg-blue-50/40">
-                                    <input
-                                      type="number"
-                                      step="0.1"
-                                      value={thread.mLen}
-                                      onChange={(e) =>
-                                        updateThread(
-                                          pIdx,
-                                          tIdx,
-                                          'mLen',
-                                          parseFloat(e.target.value) || 0
-                                        )
-                                      }
-                                      className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold text-blue-900 bg-white"
-                                    />
-                                  </td>
-                                  <td className="p-1.5 bg-blue-50/40">
-                                    <select
-                                      value={thread.cLen}
-                                      onChange={(e) =>
-                                        updateThread(
-                                          pIdx,
-                                          tIdx,
-                                          'cLen',
-                                          parseInt(e.target.value) || 5000
-                                        )
-                                      }
-                                      className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold text-blue-900 bg-white"
-                                    >
-                                      {DROPDOWNS.cones.map((c) => (
-                                        <option key={c} value={c}>
-                                          {c}m
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </td>
-                                  <td className="p-1.5 bg-persian-50/80 text-center font-black text-persian-900 text-sm">
-                                    {reqCones}
-                                  </td>
-                                  <td className="p-1.5 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => removeThread(pIdx, tIdx)}
-                                      className="text-slate-400 hover:text-rose-600 p-1"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-
-                        <button
-                          type="button"
-                          onClick={() => addThread(pIdx)}
-                          className="mt-2 text-[11px] font-bold text-persian-600 hover:text-persian-800 flex items-center gap-1"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add Thread Row</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="submit"
-                  className="bg-persian-800 hover:bg-persian-700 text-white font-bold px-8 py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition-all"
-                >
-                  {editingStyleId ? 'Update Master Style' : 'Save Master Style'}
-                </button>
-              </div>
+              <button
+                type="submit"
+                disabled={companies.length === 0}
+                className="bg-persian-800 hover:bg-persian-700 disabled:bg-slate-300 text-white font-bold px-8 py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition-all"
+              >
+                Save Style to Database
+              </button>
             </form>
           </div>
 
-          {/* Style Directory Table */}
+          {/* Directory Table */}
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4">
             <h3 className="font-black text-sm uppercase text-slate-800">
-              Style Master Catalog Directory
+              Live Database Styles Catalog ({styles.length})
             </h3>
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="p-4">Style Code</th>
-                    <th className="p-4">Company</th>
-                    <th className="p-4">Style Name</th>
-                    <th className="p-4">Fabric</th>
-                    <th className="p-4">Unit Price</th>
-                    <th className="p-4">Composition</th>
-                    <th className="p-4 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {styles.map((style) => {
-                    const totalThreads = style.parts.reduce(
-                      (acc, p) => acc + p.threads.length,
-                      0
-                    );
-                    return (
-                      <tr key={style.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="p-4 font-black text-persian-800 font-mono text-sm">
-                          {style.code}
-                        </td>
-                        <td className="p-4 font-bold text-slate-700">{style.company}</td>
-                        <td className="p-4 font-medium text-slate-800">{style.name}</td>
-                        <td className="p-4 text-slate-600">{style.fabric}</td>
-                        <td className="p-4 font-black text-emerald-700 font-mono">
-                          {style.currency} {style.price.toFixed(2)}
-                        </td>
-                        <td className="p-4 text-slate-500 font-mono text-[11px]">
-                          {style.parts.length} Part(s) • {totalThreads} Thread(s)
-                        </td>
+
+            {styles.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl space-y-2">
+                <Shirt className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold text-slate-500">
+                  No styles found in the Supabase database.
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Create a client company first, then register your real style using the form above.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-4">Style Name</th>
+                      <th className="p-4">Client Company</th>
+                      <th className="p-4">Target / Hr</th>
+                      <th className="p-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {styles.map((s) => (
+                      <tr key={s.id} className="hover:bg-slate-50">
+                        <td className="p-4 font-bold text-slate-900 font-sans">{s.name}</td>
+                        <td className="p-4 text-slate-600">{s.company}</td>
+                        <td className="p-4 font-black text-persian-800">{s.target} Pcs</td>
                         <td className="p-4 text-center space-x-2">
                           <button
-                            onClick={() => openStrikeOffSheet(style)}
-                            className="bg-persian-50 hover:bg-persian-100 text-persian-800 font-bold px-3 py-1.5 rounded-lg border border-persian-200 text-xs transition-colors inline-flex items-center gap-1"
+                            onClick={() => openStrikeOffSheet(s)}
+                            className="bg-persian-50 text-persian-800 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-persian-100"
                           >
-                            <Printer className="w-3 h-3" />
-                            <span>Strike-Off Sheet</span>
+                            Strike-Off Sheet
                           </button>
                           <button
-                            onClick={() => editStyle(style)}
-                            className="text-slate-400 hover:text-persian-700 p-1.5 rounded-lg transition-colors"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => deleteStyle(style.id)}
-                            className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors"
+                            onClick={() => handleDeleteStyle(s.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* ============================================================== */}
-      {/* 2. CLIENTS / COMPANIES TAB */}
+      {/* 2. CLIENTS TAB */}
       {/* ============================================================== */}
       {activeTab === 'companies' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-1 h-fit space-y-4">
             <h3 className="font-black text-sm uppercase text-slate-800 flex items-center gap-2">
               <Building2 className="w-4 h-4 text-persian-600" />
-              <span>{editingCompId ? 'Edit Client Company' : 'Add Client Company'}</span>
+              <span>Register Real Client Company</span>
             </h3>
 
             <form onSubmit={handleCompanySubmit} className="space-y-4">
@@ -992,7 +562,7 @@ export default function MasterDataPage() {
                   type="text"
                   value={compName}
                   onChange={(e) => setCompName(e.target.value)}
-                  placeholder="e.g. Nike Apparel"
+                  placeholder="e.g. MAS Holdings / Brandix"
                   required
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
                 />
@@ -1000,204 +570,18 @@ export default function MasterDataPage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Contact Person *
+                  Color Tag Code
                 </label>
-                <input
-                  type="text"
-                  value={compContact}
-                  onChange={(e) => setCompContact(e.target.value)}
-                  placeholder="Representative name"
-                  required
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={compEmail}
-                  onChange={(e) => setCompEmail(e.target.value)}
-                  placeholder="contact@company.com"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Phone Number
-                </label>
-                <input
-                  type="text"
-                  value={compPhone}
-                  onChange={(e) => setCompPhone(e.target.value)}
-                  placeholder="+94 11 234 5678"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  className="flex-1 bg-persian-800 hover:bg-persian-700 text-white font-bold p-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition-all"
-                >
-                  {editingCompId ? 'Update Client' : 'Register Client'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-2 space-y-4">
-            <h3 className="font-black text-sm uppercase text-slate-800">Registered Client Directory</h3>
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="p-4">Company Name</th>
-                    <th className="p-4">Contact Person</th>
-                    <th className="p-4">Email</th>
-                    <th className="p-4">Phone</th>
-                    <th className="p-4 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {companies.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50">
-                      <td className="p-4 font-black text-persian-900 text-sm">{c.name}</td>
-                      <td className="p-4 font-semibold text-slate-700">{c.contact}</td>
-                      <td className="p-4 font-mono text-blue-600">{c.email || '-'}</td>
-                      <td className="p-4 font-mono text-slate-600">{c.phone || '-'}</td>
-                      <td className="p-4 text-center space-x-2">
-                        <button
-                          onClick={() => {
-                            setEditingCompId(c.id);
-                            setCompName(c.name);
-                            setCompContact(c.contact);
-                            setCompEmail(c.email);
-                            setCompPhone(c.phone);
-                          }}
-                          className="text-slate-400 hover:text-persian-700 p-1"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm('Delete client?')) {
-                              persistCompanies(companies.filter((item) => item.id !== c.id));
-                            }
-                          }}
-                          className="text-slate-400 hover:text-rose-600 p-1"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* 3. MACHINE INVENTORY TAB */}
-      {/* ============================================================== */}
-      {activeTab === 'machines' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-1 h-fit space-y-4">
-            <h3 className="font-black text-sm uppercase text-slate-800 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-persian-600" />
-              <span>{editingMachId ? 'Edit Machine Unit' : 'Register Machine Unit'}</span>
-            </h3>
-
-            <form onSubmit={handleMachineSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Machine Identifier *
-                </label>
-                <input
-                  type="text"
-                  value={machName}
-                  onChange={(e) => setMachName(e.target.value)}
-                  placeholder="e.g. Machine 14"
-                  required
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Head Count *
-                  </label>
-                  <input
-                    type="number"
-                    value={machHeads}
-                    onChange={(e) => setMachHeads(parseInt(e.target.value) || 0)}
-                    required
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Speed (SPM) *
-                  </label>
-                  <input
-                    type="number"
-                    value={machSpeed}
-                    onChange={(e) => setMachSpeed(parseInt(e.target.value) || 0)}
-                    required
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Brand *</label>
-                <input
-                  type="text"
-                  value={machBrand}
-                  onChange={(e) => setMachBrand(e.target.value)}
-                  placeholder="e.g. Tajima"
-                  required
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none"
-                />
-              </div>
-
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  Supported Capabilities
-                </label>
-                <div className="flex gap-4">
-                  {['Normal', 'Chenille', 'Sequence'].map((t) => (
-                    <label key={t} className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={machTypes.includes(t)}
-                        onChange={(e) => {
-                          if (e.target.checked) setMachTypes([...machTypes, t]);
-                          else setMachTypes(machTypes.filter((item) => item !== t));
-                        }}
-                        className="rounded text-persian-600"
-                      />
-                      <span>{t}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
                 <select
-                  value={machStatus}
-                  onChange={(e) => setMachStatus(e.target.value as any)}
+                  value={compColorScheme}
+                  onChange={(e) => setCompColorScheme(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none"
                 >
-                  <option value="Active">Active</option>
-                  <option value="Maintenance">Maintenance</option>
+                  <option value="indigo">Indigo Blue</option>
+                  <option value="emerald">Emerald Green</option>
+                  <option value="amber">Amber Gold</option>
+                  <option value="purple">Purple</option>
+                  <option value="slate">Slate Grey</option>
                 </select>
               </div>
 
@@ -1205,86 +589,204 @@ export default function MasterDataPage() {
                 type="submit"
                 className="w-full bg-persian-800 hover:bg-persian-700 text-white font-bold p-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition-all"
               >
-                {editingMachId ? 'Update Machine' : 'Save Machine'}
+                Save Client to Database
               </button>
             </form>
           </div>
 
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-2 space-y-4">
             <h3 className="font-black text-sm uppercase text-slate-800">
-              13-Machine Fleet Inventory
+              Live Database Client Directory ({companies.length})
             </h3>
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="p-4">Machine Unit</th>
-                    <th className="p-4">Brand</th>
-                    <th className="p-4">Heads</th>
-                    <th className="p-4">Max Speed</th>
-                    <th className="p-4">Capabilities</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {machines.map((m) => (
-                    <tr key={m.id} className="hover:bg-slate-50">
-                      <td className="p-4 font-black text-slate-800">{m.name}</td>
-                      <td className="p-4 font-semibold text-slate-600">{m.brand}</td>
-                      <td className="p-4 font-mono">{m.heads} Heads</td>
-                      <td className="p-4 font-mono">{m.speed} SPM</td>
-                      <td className="p-4">
-                        <div className="flex gap-1">
-                          {m.types.map((t) => (
-                            <span
-                              key={t}
-                              className="bg-persian-100 text-persian-800 text-[10px] font-bold px-2 py-0.5 rounded"
-                            >
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`text-[10px] font-black px-2.5 py-1 rounded-full ${
-                            m.status === 'Active'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {m.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-center space-x-2">
-                        <button
-                          onClick={() => {
-                            setEditingMachId(m.id);
-                            setMachName(m.name);
-                            setMachHeads(m.heads);
-                            setMachSpeed(m.speed);
-                            setMachBrand(m.brand);
-                            setMachTypes(m.types);
-                            setMachStatus(m.status);
-                          }}
-                          className="text-slate-400 hover:text-persian-700 p-1"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                      </td>
+
+            {companies.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl space-y-2">
+                <Building2 className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold text-slate-500">
+                  No client companies registered in Supabase.
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Register your first real client company using the form on the left.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-4">Company Name</th>
+                      <th className="p-4">Color Tag</th>
+                      <th className="p-4 text-center">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {companies.map((c) => (
+                      <tr key={c.id} className="hover:bg-slate-50">
+                        <td className="p-4 font-black text-persian-900 text-sm">{c.name}</td>
+                        <td className="p-4">
+                          <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md text-[10px] font-mono font-bold uppercase">
+                            {c.color_scheme}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => handleDeleteClient(c.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* ============================================================== */}
-      {/* 4. PHYSICAL STRIKE-OFF SUBMISSION SHEET TAB (PRINTABLE A4) */}
+      {/* 3. MACHINES TAB */}
       {/* ============================================================== */}
+      {activeTab === 'machines' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-1 h-fit space-y-4">
+            <h3 className="font-black text-sm uppercase text-slate-800 flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-persian-600" />
+              <span>Register Real Machine Unit</span>
+            </h3>
+
+            <form onSubmit={handleMachineSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Machine # *
+                  </label>
+                  <input
+                    type="number"
+                    value={machNumber}
+                    onChange={(e) => setMachNumber(parseInt(e.target.value) || 1)}
+                    required
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Machine Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={machName}
+                    onChange={(e) => setMachName(e.target.value)}
+                    placeholder="Machine 01"
+                    required
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Heads</label>
+                  <input
+                    type="number"
+                    value={machHeads}
+                    onChange={(e) => setMachHeads(parseInt(e.target.value) || 15)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Speed SPM</label>
+                  <input
+                    type="number"
+                    value={machSpeed}
+                    onChange={(e) => setMachSpeed(parseInt(e.target.value) || 1000)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Brand</label>
+                <input
+                  type="text"
+                  value={machBrand}
+                  onChange={(e) => setMachBrand(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-persian-800 hover:bg-persian-700 text-white font-bold p-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition-all"
+              >
+                Save Machine to Database
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 lg:col-span-2 space-y-4">
+            <h3 className="font-black text-sm uppercase text-slate-800">
+              Live Database Machine Fleet ({machines.length})
+            </h3>
+
+            {machines.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl space-y-2">
+                <Cpu className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold text-slate-500">
+                  No machines registered in Supabase database.
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Register your factory machines using the form on the left.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-4">#</th>
+                      <th className="p-4">Machine Name</th>
+                      <th className="p-4">Brand</th>
+                      <th className="p-4">Heads</th>
+                      <th className="p-4">Speed</th>
+                      <th className="p-4">Status</th>
+                      <th className="p-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {machines.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50">
+                        <td className="p-4 font-bold text-persian-800">{m.machine_number}</td>
+                        <td className="p-4 font-sans font-bold text-slate-900">{m.machine_name}</td>
+                        <td className="p-4 text-slate-600 font-sans">{m.brand || '-'}</td>
+                        <td className="p-4">{m.heads || '-'}</td>
+                        <td className="p-4">{m.speed || '-'} SPM</td>
+                        <td className="p-4">
+                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold">
+                            {m.status}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => handleDeleteMachine(m.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. STRIKE OFF SHEET */}
       {activeTab === 'sheet' && selectedStyleForSheet && (
         <div className="space-y-6">
           <div className="flex items-center justify-between no-print bg-white p-4 rounded-2xl border border-slate-200">
@@ -1293,218 +795,24 @@ export default function MasterDataPage() {
               className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-slate-900"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Style Master</span>
+              <span>Back to Styles</span>
             </button>
-
             <button
               onClick={() => window.print()}
-              className="inline-flex items-center gap-2 bg-persian-800 hover:bg-persian-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md"
+              className="bg-persian-800 text-white font-bold text-xs px-4 py-2 rounded-xl"
             >
-              <Printer className="w-4 h-4" />
-              <span>Print A4 Strike-Off Sheet</span>
+              Print Strike-Off Sheet
             </button>
           </div>
 
-          {/* Printable A4 Sheet Container */}
-          <div className="printable-area max-w-4xl mx-auto space-y-12">
-            {selectedStyleForSheet.parts.map((part, pIdx) => {
-              const currentDate = new Date().toLocaleDateString('en-GB');
-
-              return (
-                <div
-                  key={pIdx}
-                  className="print-page bg-white text-black mx-auto w-[210mm] min-h-[297mm] border-[2px] border-black p-0 box-border flex flex-col shadow-xl relative"
-                >
-                  {/* Header Title */}
-                  <div className="flex h-[85px] border-b-[2px] border-black">
-                    <div className="flex-1 px-5 flex flex-col justify-center border-r-[2px] border-black">
-                      <h1 className="text-3xl font-serif font-black uppercase tracking-wide leading-none">
-                        DINUSHA
-                      </h1>
-                      <h2 className="text-[10px] font-bold uppercase tracking-widest mt-1">
-                        Embroidery (Pvt) Ltd • Weliweriya
-                      </h2>
-                    </div>
-                    <div className="w-[140px] flex items-center justify-center p-2">
-                      <div className="w-16 h-16 rounded-full border-[2px] border-slate-700 flex items-center justify-center font-serif italic text-lg font-bold">
-                        Dinusha
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Document Title */}
-                  <div className="border-b-[2px] border-black text-center py-2 bg-slate-50">
-                    <h2 className="text-base font-bold font-serif uppercase tracking-wider">
-                      Embellishment Strike Off Submission Sheet
-                    </h2>
-                  </div>
-
-                  {/* Metadata Grid */}
-                  <div className="grid grid-cols-2 border-b-[2px] border-black text-xs">
-                    <div className="border-r-[2px] border-black">
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Customer
-                        </div>
-                        <div className="px-3 font-semibold uppercase text-xs truncate">
-                          {selectedStyleForSheet.company}
-                        </div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Style No
-                        </div>
-                        <div className="px-3 font-bold font-mono text-xs">
-                          {selectedStyleForSheet.code}
-                        </div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Graphic Name
-                        </div>
-                        <div className="px-3 font-semibold text-xs truncate">
-                          {selectedStyleForSheet.name} — {part.name}
-                        </div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Fabric Color
-                        </div>
-                        <div className="px-3 font-semibold text-xs">
-                          {selectedStyleForSheet.fabric}
-                        </div>
-                      </div>
-                      <div className="flex h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Date
-                        </div>
-                        <div className="px-3 font-mono font-semibold text-xs">
-                          {currentDate}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Technique
-                        </div>
-                        <div className="px-3 font-semibold text-xs">Embroidery (Multi-Head)</div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Target Output
-                        </div>
-                        <div className="px-3 font-bold text-xs">
-                          {selectedStyleForSheet.target} Pcs/Hour
-                        </div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Total Order
-                        </div>
-                        <div className="px-3 font-mono font-bold text-xs">
-                          {selectedStyleForSheet.qty.toLocaleString()} Pcs
-                        </div>
-                      </div>
-                      <div className="flex border-b border-black h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Submission No
-                        </div>
-                        <div className="px-3 font-mono text-xs">SUB-01</div>
-                      </div>
-                      <div className="flex h-7 items-center">
-                        <div className="w-32 pl-2 font-bold border-r border-black h-full flex items-center">
-                          Price
-                        </div>
-                        <div className="px-3 font-mono font-bold text-xs">
-                          {selectedStyleForSheet.currency}{' '}
-                          {selectedStyleForSheet.price.toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Body Content */}
-                  <div className="flex flex-1">
-                    {/* Left Swatch Attach Area */}
-                    <div className="flex-1 relative bg-white flex flex-col items-center justify-center p-8 border-r-[2px] border-black">
-                      <div className="border-2 border-dashed border-slate-300 w-full h-[380px] rounded-2xl flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
-                        <span className="text-slate-300 text-2xl font-bold uppercase tracking-wider select-none">
-                          Attach Strike-Off Sample Here
-                        </span>
-                        <span className="text-slate-400 text-xs mt-2 font-mono">
-                          {part.name} (Qty: {part.qty})
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Right Specifications Column */}
-                    <div className="w-[240px] flex flex-col">
-                      <div className="text-center p-1.5 border-b border-black text-xs font-bold bg-slate-100">
-                        Thread Colours
-                      </div>
-                      <div className="flex text-xs border-b border-black text-center font-bold">
-                        <div className="w-1/2 border-r border-black p-1">Shade No</div>
-                        <div className="w-1/2 p-1">Sample</div>
-                      </div>
-
-                      {/* 14 Thread Shade Slots */}
-                      <div className="flex-col border-b-[2px] border-black bg-white">
-                        {Array.from({ length: 14 }).map((_, tIdx) => {
-                          const thread = part.threads[tIdx];
-                          return (
-                            <div
-                              key={tIdx}
-                              className="flex border-b border-black h-[22px] last:border-b-0"
-                            >
-                              <div className="w-1/2 border-r border-black px-1.5 text-[10px] font-mono flex items-center font-bold">
-                                {thread ? thread.shade : ''}
-                              </div>
-                              <div className="w-1/2 px-1.5 text-[10px] flex items-center text-slate-700 truncate">
-                                {thread ? thread.color : ''}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Backing & Needle Details */}
-                      <div className="text-xs bg-white border-b-[2px] border-black">
-                        <div className="flex flex-col border-b border-black">
-                          <div className="px-2 py-0.5 font-bold border-b border-black bg-slate-50 text-[10px] uppercase text-center">
-                            Backing Type
-                          </div>
-                          <div className="p-2 text-center font-semibold text-[11px]">
-                            {part.backing}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col border-b border-black">
-                          <div className="px-2 py-0.5 font-bold border-b border-black bg-slate-50 text-[10px] uppercase text-center">
-                            Needle Size
-                          </div>
-                          <div className="p-2 text-center font-bold text-[11px]">
-                            {part.needle}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Sign-off Block */}
-                      <div className="p-4 bg-white flex-1 flex flex-col justify-end">
-                        <div className="text-xs text-center space-y-4">
-                          <span className="font-bold block">Approved By:</span>
-                          <div className="border-b border-dotted border-black w-36 mx-auto" />
-                          <span className="text-[10px] text-slate-500 block">
-                            Factory Quality Manager
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="printable-area max-w-4xl mx-auto bg-white border-2 border-black p-8 text-black">
+            <h1 className="text-2xl font-serif font-black uppercase">DINUSHA EMBROIDERY</h1>
+            <p className="text-xs uppercase font-bold">Embellishment Strike Off Submission Sheet</p>
+            <div className="mt-4 p-4 border border-black font-mono text-xs">
+              <p>Style: {selectedStyleForSheet.name}</p>
+              <p>Client: {selectedStyleForSheet.company}</p>
+              <p>Target: {selectedStyleForSheet.target} Pcs/Hr</p>
+            </div>
           </div>
         </div>
       )}

@@ -10,30 +10,10 @@ import {
   ArrowLeft,
   Activity,
   Layers,
+  Sparkles,
 } from 'lucide-react';
-
-interface CheckingBlock {
-  id: string;
-  client: string;
-  style: string;
-  startCol: number;
-  span: number;
-  plan: number;
-  actual: number;
-}
-
-interface CheckerRow {
-  id: string;
-  status: 'ACTIVE' | 'IDLE';
-  styles: CheckingBlock[];
-}
-
-interface StyleMasterItem {
-  name: string;
-  company: string;
-  orderQty: number;
-  todayDeliveryQty: number;
-}
+import { fetchQualityAssignments, DbQualityAssignment } from '@/actions/quality';
+import { fetchDbStyles, DbStyle } from '@/actions/master-data';
 
 const SHIFT_HOURS = [
   '08:00',
@@ -49,109 +29,80 @@ const SHIFT_HOURS = [
   '18:00',
 ];
 
-const CLIENT_STYLES: Record<string, { bg: string; text: string; border: string; tag: string }> = {
-  'Nike Apparel': {
-    bg: 'bg-indigo-950/70',
-    text: 'text-indigo-200',
-    border: 'border-indigo-500/40',
-    tag: 'bg-indigo-600',
-  },
-  'Motif Brand': {
-    bg: 'bg-amber-950/70',
-    text: 'text-amber-200',
-    border: 'border-amber-500/40',
-    tag: 'bg-amber-600',
-  },
-  'Tesco Sri Lanka': {
-    bg: 'bg-emerald-950/70',
-    text: 'text-emerald-200',
-    border: 'border-emerald-500/40',
-    tag: 'bg-emerald-600',
-  },
-  'Adidas Sportswear': {
-    bg: 'bg-purple-950/70',
-    text: 'text-purple-200',
-    border: 'border-purple-500/40',
-    tag: 'bg-purple-600',
-  },
-};
-
-const DEFAULT_STYLES: StyleMasterItem[] = [
-  { name: 'Miami Denim', company: 'Nike Apparel', orderQty: 2500, todayDeliveryQty: 1000 },
-  { name: 'Miami Strawberry', company: 'Motif Brand', orderQty: 1500, todayDeliveryQty: 500 },
-  { name: 'F/S Animals', company: 'Tesco Sri Lanka', orderQty: 1800, todayDeliveryQty: 800 },
-  { name: 'Miami Big love', company: 'Adidas Sportswear', orderQty: 3200, todayDeliveryQty: 1200 },
-  { name: 'Track Jacket Logo #102', company: 'Nike Apparel', orderQty: 2000, todayDeliveryQty: 0 },
+const DEFAULT_STATIONS = [
+  'Checker Table 01 (Yamuna)',
+  'Checker Table 02 (Dilrukshi)',
+  'Checker Table 03 (Sachini)',
+  'Checker Table 04 (Nawodhya)',
+  'Checker Table 05 (Nadeera)',
+  'Checker Table 06 (Bimesha)',
+  'Checker Table 07 (Ramalsha)',
+  'Checker Table 08 (Nethmini)',
 ];
 
 export default function QualityLivePage() {
-  const [checkers, setCheckers] = useState<CheckerRow[]>([]);
-  const [stylesMaster, setStylesMaster] = useState<StyleMasterItem[]>(DEFAULT_STYLES);
+  const [assignments, setAssignments] = useState<DbQualityAssignment[]>([]);
+  const [styles, setStyles] = useState<DbStyle[]>([]);
+  const [currentTime, setCurrentTime] = useState<string>('');
 
   useEffect(() => {
-    const loadData = () => {
-      const savedCheckers = localStorage.getItem('dinusha_checkers_data_v4');
-      const savedStyles = localStorage.getItem('dinusha_qc_styles_v4');
-      if (savedCheckers) setCheckers(JSON.parse(savedCheckers));
-      if (savedStyles) setStylesMaster(JSON.parse(savedStyles));
+    const updateClock = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
     };
+    updateClock();
+    const clockTimer = setInterval(updateClock, 1000);
+    return () => clearInterval(clockTimer);
+  }, []);
 
+  const loadData = async () => {
+    try {
+      const [qcData, styleData] = await Promise.all([
+        fetchQualityAssignments(),
+        fetchDbStyles(),
+      ]);
+      setAssignments(qcData);
+      setStyles(styleData);
+    } catch (err) {
+      console.error('Failed to load QC live wallboard data:', err);
+    }
+  };
+
+  useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 3000);
+    const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // Aggregated Metrics
-  let shiftActualTotal = 0;
-  let shiftDeliveryTargetTotal = 0;
-  const styleMetrics: Record<
-    string,
-    { orderQty: number; plannedCheckingQty: number; actualDoneQty: number; todayDeliveryQty: number; company: string }
-  > = {};
+  // Aggregated Totals
+  const totalPlan = assignments.reduce((acc, a) => acc + a.plan_qty, 0);
+  const totalActual = assignments.reduce((acc, a) => acc + a.actual_qty, 0);
+  const overallPct = totalPlan > 0 ? Math.round((totalActual / totalPlan) * 100) : 0;
 
-  stylesMaster.forEach((sm) => {
-    styleMetrics[sm.name] = {
-      orderQty: sm.orderQty,
-      plannedCheckingQty: 0,
-      actualDoneQty: 0,
-      todayDeliveryQty: sm.todayDeliveryQty,
-      company: sm.company,
-    };
+  // Group by checker
+  const assignmentsByChecker: Record<string, DbQualityAssignment[]> = {};
+  DEFAULT_STATIONS.forEach((station) => {
+    assignmentsByChecker[station] = [];
   });
-
-  checkers.forEach((c) => {
-    c.styles.forEach((s) => {
-      shiftActualTotal += s.actual;
-      if (styleMetrics[s.style]) {
-        styleMetrics[s.style].plannedCheckingQty += s.plan;
-        styleMetrics[s.style].actualDoneQty += s.actual;
-      }
-    });
-  });
-
-  // Enforce Auto-Cap Logic for Read-Only Display to maintain Data Integrity
-  stylesMaster.forEach((sm) => {
-    if (styleMetrics[sm.name].todayDeliveryQty > styleMetrics[sm.name].plannedCheckingQty) {
-      styleMetrics[sm.name].todayDeliveryQty = styleMetrics[sm.name].plannedCheckingQty;
+  assignments.forEach((a) => {
+    if (!assignmentsByChecker[a.checker_name]) {
+      assignmentsByChecker[a.checker_name] = [];
     }
-    shiftDeliveryTargetTotal += styleMetrics[sm.name].todayDeliveryQty;
+    assignmentsByChecker[a.checker_name].push(a);
   });
-
-  const overallPct =
-    shiftDeliveryTargetTotal > 0
-      ? Math.round((shiftActualTotal / shiftDeliveryTargetTotal) * 100)
-      : 0;
 
   return (
     <div className="space-y-6 text-slate-100 font-sans">
-      {/* Top Checking KPIs */}
+      {/* Top Floor KPIs */}
       <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Main Target Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Daily Checking vs Delivery Target
+                QC Passed vs Shift Target
               </span>
               <span
                 className={`text-xs font-black px-3 py-1 rounded-full border ${
@@ -162,16 +113,16 @@ export default function QualityLivePage() {
                     : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
                 }`}
               >
-                {overallPct}% MET
+                {overallPct}% PASSED
               </span>
             </div>
 
             <div className="flex items-baseline space-x-2 mt-2">
               <span className="text-4xl font-black text-emerald-400 font-mono">
-                {shiftActualTotal.toLocaleString()}
+                {totalActual.toLocaleString()}
               </span>
               <span className="text-sm font-semibold text-slate-400">
-                / {shiftDeliveryTargetTotal.toLocaleString()} Pcs Delivered
+                / {totalPlan.toLocaleString()} Target Pcs
               </span>
             </div>
           </div>
@@ -191,189 +142,164 @@ export default function QualityLivePage() {
             </div>
             <div className="flex justify-between items-center text-[11px] font-semibold text-slate-400 mt-2.5">
               <span className="flex items-center gap-1.5 text-emerald-400">
-                <Users className="w-3.5 h-3.5" />8 Active Checkers Working
+                <Users className="w-3.5 h-3.5" />
+                8 Inspection Stations
               </span>
-              <span>Day Shift (08:00 - 19:00)</span>
+              <span className="font-mono text-slate-300">{currentTime || '08:00 - 19:00'}</span>
             </div>
           </div>
         </div>
 
-        {/* Style-Wise Output & Delivery Cards */}
+        {/* Style-Wise Output Stream */}
         <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-emerald-400" />
-              <span>Style-Wise Output & Delivery Breakdown</span>
-            </h4>
-            <span className="text-[11px] text-slate-500 font-mono">Aggregated Across Checkers</span>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-300">
+                Quality Inspection Stream (Live Database)
+              </h4>
+            </div>
+            <span className="text-[11px] text-slate-500">Auto-refresh every 5s</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {stylesMaster.map((sm) => {
-              const data = styleMetrics[sm.name];
-              const cStyle = CLIENT_STYLES[data.company] || CLIENT_STYLES['Nike Apparel'];
-
-              return (
-                <div
-                  key={sm.name}
-                  className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5"
-                >
-                  <div>
-                    <span
-                      className={`${cStyle.tag} text-white font-extrabold text-[9px] px-2 py-0.5 rounded uppercase tracking-wider`}
-                    >
-                      {data.company}
-                    </span>
-                    <h5 className="font-extrabold text-slate-200 text-xs truncate mt-2">
-                      {sm.name}
-                    </h5>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                    <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
-                      <span className="text-[9px] text-slate-500 uppercase block font-sans">
-                        Checked
+          {assignments.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 text-xs font-semibold">
+              No quality inspection blocks scheduled in the database for today.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              {assignments.map((a) => {
+                const pct = a.plan_qty > 0 ? Math.round((a.actual_qty / a.plan_qty) * 100) : 0;
+                return (
+                  <div
+                    key={a.id}
+                    className="bg-slate-950/70 border border-slate-800 p-3 rounded-2xl flex flex-col justify-between"
+                  >
+                    <div>
+                      <span className="text-[9px] font-black uppercase text-emerald-400 block truncate">
+                        {a.client_name}
                       </span>
-                      <span className="font-bold text-emerald-400">
-                        {data.actualDoneQty.toLocaleString()}
-                      </span>
+                      <h5 className="font-black text-xs text-white truncate mt-0.5" title={a.style_name}>
+                        {a.style_name}
+                      </h5>
                     </div>
-                    <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
-                      <span className="text-[9px] text-slate-500 uppercase block font-sans">
-                        Delivery
-                      </span>
-                      <span className="font-bold text-indigo-400">
-                        {data.todayDeliveryQty.toLocaleString()}
+
+                    <div className="mt-3 flex items-end justify-between">
+                      <div>
+                        <span className="text-xs font-mono font-black text-emerald-400">
+                          {a.actual_qty.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-slate-500"> / {a.plan_qty} pcs</span>
+                      </div>
+                      <span className="text-[10px] font-black px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded">
+                        {pct}%
                       </span>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Main Floor TV Wallboard 8 Checkers Matrix */}
-      <section className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Hours Header */}
-        <div className="flex border-b border-slate-800 bg-slate-950 text-slate-300 font-bold text-xs sticky top-0 z-20">
-          <div className="w-64 p-3 bg-slate-900 border-r border-slate-800 uppercase tracking-wider flex items-center justify-between shrink-0">
-            <span className="text-emerald-400 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              8 Quality Checkers
-            </span>
+      {/* Main Checker Station Matrix */}
+      <section className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="flex border-b border-slate-800 bg-slate-950/80 font-semibold text-xs text-slate-400 sticky top-0 z-20">
+          <div className="w-80 p-3.5 bg-slate-950 border-r border-slate-800 font-black text-white uppercase tracking-wider flex items-center justify-between shrink-0">
+            <span>Checker Station & Crew</span>
             <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
-              Staff
+              Live Fleet
             </span>
           </div>
 
-          <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-800">
+          <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-800 font-mono text-[11px]">
             {SHIFT_HOURS.map((h, idx) => (
               <div key={h} className="py-2.5 px-1 flex flex-col items-center justify-center">
-                <span className="font-mono font-bold text-white text-xs">{h}</span>
-                <span className="text-[10px] text-slate-500 font-medium">H{idx + 1}</span>
+                <span className="font-black text-slate-200">{h}</span>
+                <span className="text-[9px] text-slate-500">H{idx + 1}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Checker Rows */}
-        <div className="divide-y divide-slate-800/80">
-          {checkers.map((checker) => {
-            let checkerPlan = 0;
-            let checkerActual = 0;
-            checker.styles.forEach((s) => {
-              checkerPlan += s.plan;
-              checkerActual += s.actual;
-            });
-
-            const compPct = checkerPlan > 0 ? Math.round((checkerActual / checkerPlan) * 100) : 0;
+        <div className="divide-y divide-slate-800 max-h-[700px] overflow-y-auto">
+          {DEFAULT_STATIONS.map((stationName) => {
+            const rowAssignments = assignmentsByChecker[stationName] || [];
+            const planTotal = rowAssignments.reduce((acc, a) => acc + a.plan_qty, 0);
+            const actualTotal = rowAssignments.reduce((acc, a) => acc + a.actual_qty, 0);
+            const compPct = planTotal > 0 ? Math.round((actualTotal / planTotal) * 100) : 0;
 
             return (
-              <div
-                key={checker.id}
-                className="flex items-stretch hover:bg-slate-800/30 transition-colors"
-              >
-                {/* Left Staff Info */}
-                <div className="w-64 p-3.5 bg-slate-950/70 border-r border-slate-800 flex flex-col justify-between shrink-0">
+              <div key={stationName} className="flex items-stretch hover:bg-slate-800/40 transition-colors">
+                <div className="w-80 p-3.5 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-black text-white text-sm tracking-tight">
-                      {checker.id}
-                    </span>
-                    <span className="bg-emerald-500/20 text-emerald-300 text-[9px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40">
-                      Active
+                    <span className="font-black text-white text-sm">{stationName}</span>
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                      ACTIVE
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs font-mono font-semibold text-slate-400 mt-2">
-                    <span>
-                      <strong className="text-white">{checkerActual}</strong> / {checkerPlan}
-                    </span>
-                    <span
-                      className={
-                        compPct >= 100
-                          ? 'text-emerald-400 font-bold'
-                          : compPct >= 85
-                          ? 'text-amber-400 font-bold'
-                          : 'text-rose-400 font-bold'
-                      }
-                    >
-                      {compPct}%
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-1.5 border border-slate-700">
-                    <div
-                      className={`h-full rounded-full ${
-                        compPct >= 100
-                          ? 'bg-emerald-500'
-                          : compPct >= 85
-                          ? 'bg-amber-500'
-                          : 'bg-persian-500'
-                      }`}
-                      style={{ width: `${Math.min(compPct, 100)}%` }}
-                    />
+                  <div className="space-y-1 pt-1.5 border-t border-slate-800 text-[10px]">
+                    <div className="flex justify-between font-mono">
+                      <span className="text-slate-500">Audited Pieces:</span>
+                      <span className="text-emerald-400 font-bold">
+                        {actualTotal} / {planTotal} ({compPct}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-emerald-400 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(compPct, 100)}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Right Matrix Blocks */}
-                <div className="flex-1 grid grid-cols-11 relative matrix-grid p-2.5 gap-2.5 items-center">
-                  {checker.styles.map((block) => {
-                    const cStyle =
-                      CLIENT_STYLES[block.client] || CLIENT_STYLES['Nike Apparel'];
+                <div className="flex-1 grid grid-cols-11 p-2 gap-1.5 relative bg-slate-950/40">
+                  <div className="absolute inset-0 grid grid-cols-11 divide-x divide-slate-800/40 pointer-events-none" />
 
-                    return (
-                      <div
-                        key={block.id}
-                        style={{
-                          gridColumn: `${block.startCol} / span ${block.span}`,
-                        }}
-                        className={`${cStyle.bg} ${cStyle.border} border rounded-2xl p-3 shadow-md flex flex-col justify-between`}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span
-                            className={`text-[10px] font-black uppercase tracking-wider ${cStyle.text}`}
-                          >
-                            {block.client}
-                          </span>
-                        </div>
+                  {rowAssignments.length === 0 ? (
+                    <div className="col-span-11 flex items-center justify-center text-xs text-slate-600 font-medium italic">
+                      No inspection slots scheduled today
+                    </div>
+                  ) : (
+                    rowAssignments.map((block) => {
+                      const start = Math.max(1, Math.min(11, block.start_hour));
+                      const span = Math.max(1, Math.min(11 - start + 1, block.span_hours));
+                      const blockPct =
+                        block.plan_qty > 0
+                          ? Math.round((block.actual_qty / block.plan_qty) * 100)
+                          : 0;
 
-                        <div className="font-black text-white text-xs truncate mb-2">
-                          {block.style}
-                        </div>
+                      return (
+                        <div
+                          key={block.id}
+                          style={{
+                            gridColumnStart: start,
+                            gridColumnEnd: `span ${span}`,
+                          }}
+                          className="z-10 relative bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 rounded-xl p-2.5 shadow-md flex flex-col justify-between overflow-hidden"
+                        >
+                          <div>
+                            <span className="text-[8px] font-black uppercase text-white bg-emerald-600 px-1.5 py-0.5 rounded truncate block w-fit mb-1">
+                              {block.client_name}
+                            </span>
+                            <h6 className="font-black text-xs text-white truncate">
+                              {block.style_name}
+                            </h6>
+                          </div>
 
-                        <div className="flex items-center justify-between text-xs font-mono">
-                          <span className="text-slate-400 font-semibold">
-                            Plan: {block.plan}
-                          </span>
-                          <span className="bg-emerald-500 text-slate-950 font-black px-2 py-0.5 rounded-lg text-xs shadow-sm">
-                            Act: {block.actual}
-                          </span>
+                          <div className="mt-2 pt-1 border-t border-emerald-500/20 flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-emerald-400 font-black">
+                              {block.actual_qty} Pcs
+                            </span>
+                            <span className="text-slate-400 text-[10px]">{blockPct}%</span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             );

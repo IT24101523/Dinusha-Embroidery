@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Factory,
@@ -19,33 +19,32 @@ import {
   AlertCircle,
   X,
   Share2,
+  RefreshCw,
+  Cpu,
+  Users,
+  ChevronLeft,
+  ChevronRight as ChevronNext,
+  Printer,
+  Gauge,
+  Calculator,
 } from 'lucide-react';
-
-interface ProductionBlock {
-  id: string;
-  client: string;
-  style: string;
-  baseName: string;
-  startCol: number; // 1-indexed (1 to 11)
-  span: number;
-  plan: number;
-  actual: number;
-}
-
-interface MachineRow {
-  id: string;
-  num: number;
-  operator: string;
-  helper: string;
-  status: 'RUNNING' | 'SETUP' | 'MAINTENANCE';
-  styles: ProductionBlock[];
-}
-
-interface StyleMasterItem {
-  name: string;
-  company: string;
-  orderQty: number;
-}
+import {
+  fetchDbMachines,
+  fetchDbClients,
+  fetchDbStyles,
+  updateDbMachine,
+  DbMachine,
+  DbClient,
+  DbStyle,
+} from '@/actions/master-data';
+import {
+  fetchProductionSchedule,
+  createProductionAssignment,
+  updateProductionActualQty,
+  deleteProductionAssignment,
+  ProductionScheduleItem,
+} from '@/actions/production';
+import { fetchEmployees, DbEmployee } from '@/actions/employees';
 
 const SHIFT_HOURS = [
   '08:00',
@@ -61,140 +60,119 @@ const SHIFT_HOURS = [
   '18:00',
 ];
 
-const STYLES_MASTER: StyleMasterItem[] = [
-  { name: 'Track Jacket Logo #102', orderQty: 2000, company: 'Nike Apparel' },
-  { name: 'Chest Badge #88', orderQty: 1500, company: 'Motif Brand' },
-  { name: 'Floral Embroidery #502', orderQty: 1800, company: 'Tesco Sri Lanka' },
-  { name: 'Back Crest #301', orderQty: 2200, company: 'Adidas Sportswear' },
-  { name: 'Sleeve Logo #405', orderQty: 1200, company: 'Nike Apparel' },
-];
-
-const CLIENT_STYLES: Record<string, { bg: string; text: string; border: string; tag: string }> = {
-  'Nike Apparel': {
-    bg: 'bg-indigo-50/90',
-    text: 'text-indigo-950',
-    border: 'border-indigo-300',
-    tag: 'bg-indigo-700',
-  },
-  'Motif Brand': {
-    bg: 'bg-amber-50/90',
-    text: 'text-amber-950',
-    border: 'border-amber-300',
-    tag: 'bg-amber-600',
-  },
-  'Tesco Sri Lanka': {
-    bg: 'bg-emerald-50/90',
-    text: 'text-emerald-950',
-    border: 'border-emerald-300',
-    tag: 'bg-emerald-700',
-  },
-  'Adidas Sportswear': {
-    bg: 'bg-purple-50/90',
-    text: 'text-purple-950',
-    border: 'border-purple-300',
-    tag: 'bg-purple-700',
-  },
-};
-
-const OPERATORS = [
-  'Nimal',
-  'Kamal',
-  'Sunil',
-  'Bandara',
-  'Ruwan',
-  'Nuwan',
-  'Chathura',
-  'Dhammika',
-  'Mahesh',
-  'Asanka',
-  'Kasun',
-  'Tharindu',
-  'Saman',
-];
-
-const HELPERS = [
-  'Priyanta',
-  'Lalith',
-  'Dinesh',
-  'Sanjeeva',
-  'Anura',
-  'Indika',
-  'Janaka',
-  'Gayan',
-  'Roshan',
-  'Upul',
-  'Priyantha',
-  'Sujith',
-  'Buddhika',
-];
-
 export default function ProductionPage() {
-  const [machines, setMachines] = useState<MachineRow[]>([]);
-  const [stylesMaster] = useState<StyleMasterItem[]>(STYLES_MASTER);
+  const [machines, setMachines] = useState<DbMachine[]>([]);
+  const [clients, setClients] = useState<DbClient[]>([]);
+  const [styles, setStyles] = useState<DbStyle[]>([]);
+  const [employees, setEmployees] = useState<DbEmployee[]>([]);
+  const [assignments, setAssignments] = useState<ProductionScheduleItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Form State
+  // Date State (Defaults to today)
   const todayStr = new Date().toISOString().split('T')[0];
   const [formDate, setFormDate] = useState(todayStr);
-  const [formMachine, setFormMachine] = useState('Machine 01');
-  const [formCompany, setFormCompany] = useState('Nike Apparel');
-  const [formStyle, setFormStyle] = useState('Track Jacket Logo #102');
-  const [formSize, setFormSize] = useState('L');
+
+  // Form State
+  const [formMachineId, setFormMachineId] = useState('');
+  const [formClientId, setFormClientId] = useState('');
+  const [formStyleId, setFormStyleId] = useState('');
   const [formStartTime, setFormStartTime] = useState('08:00');
   const [formEndTime, setFormEndTime] = useState('18:00');
   const [formQty, setFormQty] = useState(300);
-  const [formOperator, setFormOperator] = useState('Nimal');
-  const [formHelper, setFormHelper] = useState('Priyanta');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Modal State
+  // Modal State for updating actual qty
   const [modalOpen, setModalOpen] = useState(false);
-  const [activeMacId, setActiveMacId] = useState<string | null>(null);
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
   const [editStyleName, setEditStyleName] = useState('');
   const [editPlanQty, setEditPlanQty] = useState(0);
   const [editActualQty, setEditActualQty] = useState(0);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  // Initial Data Load
-  useEffect(() => {
-    const saved = localStorage.getItem('dinusha_production_machines_v4');
-    if (saved) {
-      setMachines(JSON.parse(saved));
-    } else {
-      const initial: MachineRow[] = Array.from({ length: 13 }, (_, i) => {
-        const macNum = (i + 1).toString().padStart(2, '0');
-        const assignedStyle = STYLES_MASTER[i % STYLES_MASTER.length];
-        return {
-          id: `Machine ${macNum}`,
-          num: i + 1,
-          operator: OPERATORS[i],
-          helper: HELPERS[i],
-          status: i === 5 ? 'SETUP' : i === 11 ? 'MAINTENANCE' : 'RUNNING',
-          styles: [
-            {
-              id: `m${i}-s1`,
-              client: assignedStyle.company,
-              style: `${assignedStyle.name} (L)`,
-              baseName: assignedStyle.name,
-              startCol: 1,
-              span: 11,
-              plan: 300,
-              actual: i % 2 === 0 ? 285 : 210,
-            },
-          ],
-        };
-      });
-      setMachines(initial);
-      localStorage.setItem('dinusha_production_machines_v4', JSON.stringify(initial));
+  // Modal State for Machine Crew Assignment
+  const [crewModalOpen, setCrewModalOpen] = useState(false);
+  const [activeMachine, setActiveMachine] = useState<DbMachine | null>(null);
+  const [crewOperator, setCrewOperator] = useState('');
+  const [crewHelper, setCrewHelper] = useState('');
+  const [crewStatus, setCrewStatus] = useState<'RUNNING' | 'SETUP' | 'MAINTENANCE' | 'IDLE'>('RUNNING');
+  const [isSavingCrew, setIsSavingCrew] = useState(false);
+
+  // Load Database Data
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [macData, clientData, styleData, scheduleData, empData] = await Promise.all([
+        fetchDbMachines(),
+        fetchDbClients(),
+        fetchDbStyles(),
+        fetchProductionSchedule(formDate),
+        fetchEmployees(),
+      ]);
+      setMachines(macData);
+      setClients(clientData);
+      setStyles(styleData);
+      setAssignments(scheduleData);
+      setEmployees(empData);
+
+      if (macData.length > 0 && !formMachineId) {
+        setFormMachineId(macData[0].id);
+      }
+      if (clientData.length > 0 && !formClientId) {
+        setFormClientId(clientData[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load production data:', err);
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
+  }, [formDate, formMachineId, formClientId]);
 
-  const persistMachines = (updated: MachineRow[]) => {
-    setMachines(updated);
-    localStorage.setItem('dinusha_production_machines_v4', JSON.stringify(updated));
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Date Navigation Helpers
+  const shiftDate = (offsetDays: number) => {
+    const d = new Date(formDate);
+    d.setDate(d.getDate() + offsetDays);
+    setFormDate(d.toISOString().split('T')[0]);
+  };
+
+  const setDateToToday = () => {
+    setFormDate(todayStr);
+  };
+
+  // Filter styles by selected client
+  const availableStyles = formClientId
+    ? styles.filter((s) => s.client_id === formClientId)
+    : styles;
+
+  useEffect(() => {
+    if (availableStyles.length > 0 && !availableStyles.some((s) => s.id === formStyleId)) {
+      setFormStyleId(availableStyles[0].id);
+    }
+  }, [availableStyles, formStyleId]);
+
+  // Selected Style Info
+  const selectedStyle = styles.find((s) => s.id === formStyleId);
+
+  // Auto-calculate suggested quantity
+  const calculateTargetQty = () => {
+    const startIdx = SHIFT_HOURS.indexOf(formStartTime);
+    const endIdx = SHIFT_HOURS.indexOf(formEndTime);
+    const span = Math.max(1, endIdx - startIdx + 1);
+    const rate = selectedStyle?.target_per_hour || 25;
+    setFormQty(rate * span);
   };
 
   // Schedule Push Handler
-  const handlePushPlan = (e: React.FormEvent) => {
+  const handlePushPlan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formMachineId || !formStyleId) {
+      alert('Please select both a machine and a style.');
+      return;
+    }
+
     const startIdx = SHIFT_HOURS.indexOf(formStartTime);
     const endIdx = SHIFT_HOURS.indexOf(formEndTime);
 
@@ -203,408 +181,418 @@ export default function ProductionPage() {
       return;
     }
 
-    const startCol = startIdx + 1;
-    const span = endIdx - startIdx + 1;
+    const startHour = startIdx + 1; // 1 to 11
+    const spanHours = endIdx - startIdx + 1;
 
-    const updated = machines.map((mac) => {
-      if (mac.id === formMachine) {
-        return {
-          ...mac,
-          operator: formOperator,
-          helper: formHelper !== 'None' ? formHelper : mac.helper,
-          styles: [
-            ...mac.styles,
-            {
-              id: `block-${Date.now()}`,
-              client: formCompany,
-              style: `${formStyle} (${formSize})`,
-              baseName: formStyle,
-              startCol,
-              span,
-              plan: formQty,
-              actual: 0,
-            },
-          ],
-        };
-      }
-      return mac;
-    });
+    setIsSubmitting(true);
+    try {
+      await createProductionAssignment({
+        machine_id: formMachineId,
+        style_id: formStyleId,
+        assignment_date: formDate,
+        start_hour: startHour,
+        span_hours: spanHours,
+        plan_qty: formQty,
+        actual_qty: 0,
+      });
+      await loadData();
+    } catch (err: any) {
+      alert('Failed to schedule assignment: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    persistMachines(updated);
+  // Crew Modal Handler
+  const openCrewModal = (mac: DbMachine) => {
+    setActiveMachine(mac);
+    setCrewOperator(mac.operator_name || '');
+    setCrewHelper(mac.helper_name || '');
+    setCrewStatus(mac.status || 'RUNNING');
+    setCrewModalOpen(true);
+  };
+
+  const handleSaveCrew = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeMachine) return;
+    setIsSavingCrew(true);
+    try {
+      await updateDbMachine(activeMachine.id, {
+        operator_name: crewOperator || null,
+        helper_name: crewHelper || null,
+        status: crewStatus,
+      });
+      setCrewModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert('Failed to update machine crew: ' + err.message);
+    } finally {
+      setIsSavingCrew(false);
+    }
   };
 
   // Modal Handlers
-  const openEditModal = (macId: string, blockId: string) => {
-    const mac = machines.find((m) => m.id === macId);
-    if (!mac) return;
-    const block = mac.styles.find((b) => b.id === blockId);
-    if (!block) return;
-
-    setActiveMacId(macId);
-    setActiveBlockId(blockId);
-    setEditStyleName(block.style);
-    setEditPlanQty(block.plan);
-    setEditActualQty(block.actual);
+  const openEditModal = (assignment: ProductionScheduleItem) => {
+    setActiveAssignmentId(assignment.id);
+    setEditStyleName(assignment.style?.style_name || 'Embroidery Task');
+    setEditPlanQty(assignment.plan_qty);
+    setEditActualQty(assignment.actual_qty);
     setModalOpen(true);
   };
 
-  const updateBlock = () => {
-    if (!activeMacId || !activeBlockId) return;
-
-    const updated = machines.map((mac) => {
-      if (mac.id === activeMacId) {
-        return {
-          ...mac,
-          styles: mac.styles.map((b) =>
-            b.id === activeBlockId
-              ? {
-                  ...b,
-                  style: editStyleName,
-                  plan: editPlanQty,
-                  actual: editActualQty,
-                }
-              : b
-          ),
-        };
-      }
-      return mac;
-    });
-
-    persistMachines(updated);
-    setModalOpen(false);
+  const handleUpdateActual = async () => {
+    if (!activeAssignmentId) return;
+    setIsUpdating(true);
+    try {
+      await updateProductionActualQty(activeAssignmentId, editActualQty);
+      setModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert('Update failed: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const deleteBlock = () => {
-    if (!activeMacId || !activeBlockId) return;
-
-    const updated = machines.map((mac) => {
-      if (mac.id === activeMacId) {
-        return {
-          ...mac,
-          styles: mac.styles.filter((b) => b.id !== activeBlockId),
-        };
-      }
-      return mac;
-    });
-
-    persistMachines(updated);
-    setModalOpen(false);
+  const handleDeleteAssignment = async () => {
+    if (!activeAssignmentId) return;
+    if (!confirm('Are you sure you want to remove this production assignment?')) return;
+    setIsUpdating(true);
+    try {
+      await deleteProductionAssignment(activeAssignmentId);
+      setModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert('Delete failed: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  // Compute Style Breakdown Metrics
-  const styleMetrics: Record<string, { orderQty: number; plannedQty: number; doneQty: number }> =
-    {};
-  stylesMaster.forEach((sm) => {
-    styleMetrics[sm.name] = { orderQty: sm.orderQty, plannedQty: 0, doneQty: 0 };
+  // Group assignments by machine
+  const assignmentsByMachine: Record<string, ProductionScheduleItem[]> = {};
+  assignments.forEach((item) => {
+    if (!assignmentsByMachine[item.machine_id]) {
+      assignmentsByMachine[item.machine_id] = [];
+    }
+    assignmentsByMachine[item.machine_id].push(item);
   });
 
-  machines.forEach((mac) => {
-    mac.styles.forEach((s) => {
-      const match = stylesMaster.find((sm) => s.style.includes(sm.name));
-      if (match) {
-        styleMetrics[match.name].plannedQty += s.plan;
-        styleMetrics[match.name].doneQty += s.actual;
-      }
-    });
-  });
+  // Calculate day summary metrics
+  const totalPlannedPcs = assignments.reduce((acc, a) => acc + a.plan_qty, 0);
+  const totalActualPcs = assignments.reduce((acc, a) => acc + a.actual_qty, 0);
+  const overallEfficiency =
+    totalPlannedPcs > 0 ? Math.round((totalActualPcs / totalPlannedPcs) * 100) : 0;
+  const runningMachinesCount = machines.filter((m) => m.status === 'RUNNING').length;
 
   return (
     <div className="space-y-6">
-      {/* Top Action Bar with Wallboard Shortcut */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-200 shadow-xs no-print">
+      {/* Top Action & Date Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs no-print">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-persian-50 text-persian-700 flex items-center justify-center font-bold">
+          <div className="w-11 h-11 rounded-2xl bg-persian-50 text-persian-700 flex items-center justify-center font-bold">
             <Factory className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-black text-sm uppercase text-slate-800">
-              13-Machine Production Schedule Matrix
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-black text-sm uppercase text-slate-900 tracking-tight">
+                Daily Production Planning Matrix
+              </h3>
+              <span className="text-[10px] bg-persian-100 text-persian-800 px-2 py-0.5 rounded-full font-mono font-bold">
+                {machines.length} Machines
+              </span>
+            </div>
             <p className="text-xs text-slate-500">
-              Day Shift (08:00 - 19:00) • Real-time timeline allocations
+              Allocate embroidery styles, shift slots, and machine crews
             </p>
           </div>
         </div>
 
-        <Link
-          href="/production/live"
-          className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all"
-        >
-          <Tv className="w-4 h-4 text-emerald-400" />
-          <span>Launch TV Wallboard</span>
-        </Link>
+        {/* Date Selector with Next / Prev */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1">
+            <button
+              onClick={() => shiftDate(-1)}
+              className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 transition-colors"
+              title="Previous Day"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <input
+              type="date"
+              value={formDate}
+              onChange={(e) => setFormDate(e.target.value)}
+              className="bg-transparent px-2 text-xs font-mono font-bold text-slate-800 outline-none"
+            />
+            <button
+              onClick={() => shiftDate(1)}
+              className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 transition-colors"
+              title="Next Day"
+            >
+              <ChevronNext className="w-4 h-4" />
+            </button>
+          </div>
+
+          {formDate !== todayStr && (
+            <button
+              onClick={setDateToToday}
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+            >
+              Today
+            </button>
+          )}
+
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl transition-all"
+            title="Refresh database records"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Sync</span>
+          </button>
+
+          <Link
+            href="/employees"
+            className="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2 rounded-xl transition-all"
+          >
+            <Users className="w-3.5 h-3.5 text-persian-700" />
+            <span>Staff Roster</span>
+          </Link>
+
+          <Link
+            href="/production/live"
+            className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md transition-all"
+          >
+            <Tv className="w-4 h-4 text-emerald-400" />
+            <span>Floor Wallboard</span>
+          </Link>
+        </div>
       </div>
 
-      {/* Style Breakdown Cards Section */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h4 className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-2">
-            <Layers className="w-4 h-4 text-persian-600" />
-            <span>Style-Wise Order & Production Breakdown</span>
-          </h4>
-          <span className="text-[11px] text-slate-400 font-semibold">
-            Aggregated across all 13 machines
+      {/* Daily Target Summary Metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">
+            Day Target Plan
           </span>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-2xl font-black text-persian-800">
+              {totalPlannedPcs.toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-500 font-semibold">Pieces</span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-          {stylesMaster.map((sm) => {
-            const data = styleMetrics[sm.name] || {
-              orderQty: sm.orderQty,
-              plannedQty: 0,
-              doneQty: 0,
-            };
-            const remaining = Math.max(0, data.orderQty - data.doneQty);
-
-            return (
-              <div
-                key={sm.name}
-                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col justify-between"
-              >
-                <div className="border-b border-slate-100 pb-2">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                    {sm.company}
-                  </span>
-                  <h5 className="font-black text-slate-800 text-xs truncate mt-0.5" title={sm.name}>
-                    {sm.name}
-                  </h5>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block">
-                      Order Qty
-                    </span>
-                    <span className="font-black text-slate-800 text-sm">
-                      {data.orderQty.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="bg-amber-50/70 p-2 rounded-xl border border-amber-100">
-                    <span className="text-[9px] font-bold text-amber-800 uppercase block">
-                      Planned
-                    </span>
-                    <span className="font-black text-amber-600 text-sm">
-                      {data.plannedQty.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-100">
-                    <span className="text-[9px] font-bold text-emerald-800 uppercase block">
-                      Done
-                    </span>
-                    <span className="font-black text-emerald-600 text-sm">
-                      {data.doneQty.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="bg-indigo-50/70 p-2 rounded-xl border border-indigo-100">
-                    <span className="text-[9px] font-bold text-indigo-800 uppercase block">
-                      Remaining
-                    </span>
-                    <span className="font-black text-indigo-600 text-sm">
-                      {remaining.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <span className="text-[10px] font-extrabold uppercase text-emerald-600 tracking-wider block">
+            Actual Done Output
+          </span>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-2xl font-black text-emerald-600">
+              {totalActualPcs.toLocaleString()}
+            </span>
+            <span className="text-[11px] text-emerald-700 font-semibold">Pieces</span>
+          </div>
         </div>
-      </section>
 
-      {/* Production Plan Form Scheduler */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <span className="text-[10px] font-extrabold uppercase text-amber-600 tracking-wider block">
+            Daily Completion Rate
+          </span>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-2xl font-black text-amber-600">{overallEfficiency}%</span>
+            <span className="text-[11px] text-amber-700 font-semibold">Plan vs Actual</span>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider block">
+            Active Fleet Status
+          </span>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-2xl font-black text-slate-800">
+              {runningMachinesCount} / {machines.length}
+            </span>
+            <span className="text-[11px] text-slate-500 font-semibold">Running</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Schedule Form */}
       <section className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-          <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
             <Plus className="w-4 h-4 text-persian-600" />
-            <span>Schedule New Production Block</span>
+            <span>Schedule New Production Block ({formDate})</span>
           </h4>
           <span className="text-[11px] text-slate-400">
-            Push schedule into the 11-hour matrix
+            Select machine, style, and shift block to allocate capacity
           </span>
         </div>
 
-        <form onSubmit={handlePushPlan} className="space-y-3">
-          {/* Row 1 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Date *</label>
-              <input
-                type="date"
-                value={formDate}
-                onChange={(e) => setFormDate(e.target.value)}
-                required
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
-              />
+        {machines.length === 0 ? (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between text-xs text-amber-900">
+            <div className="flex items-center gap-2 font-semibold">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>Configure machines in Master Data before scheduling assignments.</span>
             </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Shift</label>
-              <select className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none">
-                <option value="day">Day Shift (08:00 - 19:00)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                Machine *
-              </label>
-              <select
-                value={formMachine}
-                onChange={(e) => setFormMachine(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
-              >
-                {machines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                Company *
-              </label>
-              <select
-                value={formCompany}
-                onChange={(e) => setFormCompany(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                <option value="Nike Apparel">Nike Apparel</option>
-                <option value="Motif Brand">Motif Brand</option>
-                <option value="Tesco Sri Lanka">Tesco Sri Lanka</option>
-                <option value="Adidas Sportswear">Adidas Sportswear</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Style *</label>
-              <select
-                value={formStyle}
-                onChange={(e) => setFormStyle(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                {stylesMaster.map((sm) => (
-                  <option key={sm.name} value={sm.name}>
-                    {sm.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Link
+              href="/master-data"
+              className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded-lg shrink-0"
+            >
+              Add Machines
+            </Link>
           </div>
+        ) : (
+          <form onSubmit={handlePushPlan} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                  Machine *
+                </label>
+                <select
+                  value={formMachineId}
+                  onChange={(e) => setFormMachineId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
+                  required
+                >
+                  {machines.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      Machine {m.machine_number.toString().padStart(2, '0')} ({m.machine_name}
+                      {m.operator_name ? ` • ${m.operator_name}` : ''})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Row 2 */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 items-end pt-1">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Size</label>
-              <select
-                value={formSize}
-                onChange={(e) => setFormSize(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                <option value="S">Small (S)</option>
-                <option value="M">Medium (M)</option>
-                <option value="L">Large (L)</option>
-                <option value="XL">XL</option>
-                <option value="XXL">XXL</option>
-                <option value="Free Size">Free Size</option>
-              </select>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                  Client Filter
+                </label>
+                <select
+                  value={formClientId}
+                  onChange={(e) => setFormClientId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
+                >
+                  <option value="">All Clients ({clients.length})</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                  Embroidery Style *
+                </label>
+                <select
+                  value={formStyleId}
+                  onChange={(e) => setFormStyleId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none focus:border-persian-500"
+                  required
+                >
+                  {availableStyles.length === 0 ? (
+                    <option value="">No styles available</option>
+                  ) : (
+                    availableStyles.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.style_name} {s.target_per_hour ? `(${s.target_per_hour} pcs/hr)` : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Start Hour *
+                  </label>
+                  <select
+                    value={formStartTime}
+                    onChange={(e) => setFormStartTime(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
+                  >
+                    {SHIFT_HOURS.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    End Hour *
+                  </label>
+                  <select
+                    value={formEndTime}
+                    onChange={(e) => setFormEndTime(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
+                  >
+                    {SHIFT_HOURS.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Start *</label>
-              <select
-                value={formStartTime}
-                onChange={(e) => setFormStartTime(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                {SHIFT_HOURS.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+              <div className="lg:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-600">
+                    Plan Target (Pcs) *
+                  </label>
+                  {selectedStyle?.target_per_hour && (
+                    <button
+                      type="button"
+                      onClick={calculateTargetQty}
+                      className="text-[10px] text-persian-700 hover:text-persian-900 font-bold flex items-center gap-1"
+                    >
+                      <Calculator className="w-3 h-3" />
+                      <span>Auto-calc: {selectedStyle.target_per_hour} pcs/hr</span>
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  value={formQty}
+                  onChange={(e) => setFormQty(parseInt(e.target.value) || 0)}
+                  required
+                  min={1}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-black text-persian-800 outline-none focus:border-persian-500"
+                />
+              </div>
 
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">End *</label>
-              <select
-                value={formEndTime}
-                onChange={(e) => setFormEndTime(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                {SHIFT_HOURS.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
-                  </option>
-                ))}
-              </select>
+              <div className="lg:col-span-2">
+                <button
+                  type="submit"
+                  disabled={isSubmitting || availableStyles.length === 0}
+                  className="w-full bg-persian-800 hover:bg-persian-700 disabled:bg-slate-300 text-white font-bold text-xs p-2.5 rounded-xl shadow-md shadow-persian-800/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{isSubmitting ? 'Scheduling...' : 'Push to Machine Schedule'}</span>
+                </button>
+              </div>
             </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                Plan Target *
-              </label>
-              <input
-                type="number"
-                value={formQty}
-                onChange={(e) => setFormQty(parseInt(e.target.value) || 0)}
-                required
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-black text-persian-800 outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Operator</label>
-              <select
-                value={formOperator}
-                onChange={(e) => setFormOperator(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                {OPERATORS.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">Helper</label>
-              <select
-                value={formHelper}
-                onChange={(e) => setFormHelper(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-semibold outline-none"
-              >
-                <option value="None">None</option>
-                {HELPERS.map((hp) => (
-                  <option key={hp} value={hp}>
-                    {hp}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <button
-                type="submit"
-                className="w-full bg-persian-800 hover:bg-persian-700 text-white font-bold text-xs p-2.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Push Plan</span>
-              </button>
-            </div>
-          </div>
-        </form>
+          </form>
+        )}
       </section>
 
-      {/* Main 13-Machine Gantt Matrix */}
+      {/* Main Gantt Matrix */}
       <section className="bg-white border border-slate-200 rounded-3xl shadow-soft overflow-hidden flex flex-col">
         {/* Timeline Hours Header */}
         <div className="flex border-b border-slate-200 bg-slate-50 font-semibold text-[11px] text-slate-600 sticky top-0 z-20">
           <div className="w-72 sm:w-80 p-3 bg-slate-100 border-r border-slate-300 font-bold text-persian-800 uppercase tracking-wider flex items-center justify-between shrink-0">
-            <span>Machine & Crew</span>
+            <span>Machine & Assigned Crew</span>
             <span className="text-[9px] bg-white px-2 py-0.5 rounded border border-slate-300 font-mono text-slate-500">
-              13 Units
+              {machines.length} Units
             </span>
           </div>
 
@@ -619,198 +607,345 @@ export default function ProductionPage() {
         </div>
 
         {/* Machine Rows */}
-        <div className="divide-y divide-slate-200 max-h-[650px] overflow-y-auto">
-          {machines.map((mac) => {
-            let macPlan = 0;
-            let macActual = 0;
-            mac.styles.forEach((s) => {
-              macPlan += s.plan;
-              macActual += s.actual;
-            });
+        {machines.length === 0 ? (
+          <div className="p-12 text-center text-slate-500">
+            <Factory className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="font-bold text-sm text-slate-700">No Machines In Database</p>
+            <p className="text-xs text-slate-400 mt-1">
+              Add machines in Master Data to populate the production Gantt matrix.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-200 max-h-[650px] overflow-y-auto">
+            {machines.map((mac) => {
+              const macAssignments = assignmentsByMachine[mac.id] || [];
+              const macPlan = macAssignments.reduce((acc, a) => acc + a.plan_qty, 0);
+              const macActual = macAssignments.reduce((acc, a) => acc + a.actual_qty, 0);
+              const compPct = macPlan > 0 ? Math.round((macActual / macPlan) * 100) : 0;
 
-            const compPct = macPlan > 0 ? Math.round((macActual / macPlan) * 100) : 0;
+              return (
+                <div key={mac.id} className="flex items-stretch hover:bg-slate-50/70 transition-colors">
+                  {/* Left Machine Header Card */}
+                  <div className="w-72 sm:w-80 p-3 bg-white border-r border-slate-300 flex flex-col justify-between shrink-0">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-black text-slate-900 text-xs">
+                          Machine {mac.machine_number.toString().padStart(2, '0')}
+                        </span>
+                        <button
+                          onClick={() => openCrewModal(mac)}
+                          className={`text-[9px] font-black px-2 py-0.5 rounded-full hover:scale-105 transition-transform ${
+                            mac.status === 'RUNNING'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : mac.status === 'SETUP'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-rose-100 text-rose-800 border border-rose-300'
+                          }`}
+                          title="Click to edit machine crew & status"
+                        >
+                          {mac.status} ✎
+                        </button>
+                      </div>
 
-            return (
-              <div key={mac.id} className="flex items-stretch hover:bg-slate-50/70 transition-colors">
-                {/* Left Machine Header Card */}
-                <div className="w-72 sm:w-80 p-3 bg-white border-r border-slate-300 flex flex-col justify-between shrink-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-black text-slate-900 text-xs">{mac.id}</span>
-                    <span
-                      className={`text-[9px] font-black px-2 py-0.5 rounded-full ${
-                        mac.status === 'RUNNING'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                          : mac.status === 'SETUP'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                          : 'bg-rose-100 text-rose-800 border border-rose-300'
-                      }`}
-                    >
-                      {mac.status}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-[11px] mb-1.5">
-                    <span className="bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-700 font-semibold truncate">
-                      {mac.operator}
-                    </span>
-                    <span className="bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-500 font-medium truncate">
-                      {mac.helper}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500">
-                    <span>
-                      Output: <strong className="text-slate-800">{macActual}</strong>/{macPlan} Pcs
-                    </span>
-                    <span
-                      className={
-                        compPct >= 100
-                          ? 'text-emerald-600 font-bold'
-                          : compPct >= 85
-                          ? 'text-amber-600 font-bold'
-                          : 'text-slate-600'
-                      }
-                    >
-                      {compPct}%
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1 border border-slate-200">
-                    <div
-                      className={`h-full rounded-full ${
-                        compPct >= 100
-                          ? 'bg-emerald-500'
-                          : compPct >= 85
-                          ? 'bg-amber-500'
-                          : 'bg-persian-600'
-                      }`}
-                      style={{ width: `${Math.min(compPct, 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Right Timeline Grid Tracks */}
-                <div className="flex-1 grid grid-cols-11 relative matrix-grid p-2 gap-2 items-center">
-                  {mac.styles.map((block) => {
-                    const cStyle =
-                      CLIENT_STYLES[block.client] || CLIENT_STYLES['Nike Apparel'];
-
-                    return (
-                      <div
-                        key={block.id}
-                        style={{
-                          gridColumn: `${block.startCol} / span ${block.span}`,
-                        }}
-                        onClick={() => openEditModal(mac.id, block.id)}
-                        className={`${cStyle.bg} ${cStyle.border} border rounded-xl p-2.5 shadow-2xs hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span
-                            className={`text-[9px] font-black uppercase tracking-wider ${cStyle.text}`}
+                      <div className="text-[10px] space-y-0.5 text-slate-600 mb-2">
+                        <div className="truncate">
+                          <span className="text-slate-400 font-semibold">Model: </span>
+                          <span className="font-bold text-slate-800">
+                            {mac.machine_name} {mac.brand ? `• ${mac.brand}` : ''} ({mac.heads || 15}H)
+                          </span>
+                        </div>
+                        <div className="truncate flex items-center justify-between">
+                          <span>
+                            <span className="text-slate-400 font-semibold">Operator: </span>
+                            <span className="font-bold text-slate-800">
+                              {mac.operator_name || 'Unassigned'}
+                            </span>
+                          </span>
+                          <button
+                            onClick={() => openCrewModal(mac)}
+                            className="text-[9px] text-persian-700 font-bold hover:underline"
                           >
-                            {block.client}
-                          </span>
-                          <span className="text-[9px] bg-white/90 text-slate-600 px-1 rounded font-bold opacity-0 group-hover:opacity-100 transition-opacity">
-                            Click to Edit
-                          </span>
+                            Assign
+                          </button>
                         </div>
-
-                        <div className="font-black text-slate-800 text-[11px] truncate mb-1.5">
-                          {block.style}
-                        </div>
-
-                        <div className="flex items-center justify-between text-[10px] font-bold">
-                          <span className="text-slate-600">Plan: {block.plan}</span>
-                          <span className="bg-persian-800 text-white px-2 py-0.5 rounded text-[10px] shadow-xs">
-                            Act: {block.actual}
+                        <div className="truncate">
+                          <span className="text-slate-400 font-semibold">Helper: </span>
+                          <span className="font-bold text-slate-800">
+                            {mac.helper_name || 'None'}
                           </span>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="font-bold text-slate-500">Day Target:</span>
+                        <span className="font-black text-persian-800">
+                          {macActual} / {macPlan} ({compPct}%)
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-persian-600 h-full rounded-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, compPct)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 11-Hour Gantt Timeline Slots */}
+                  <div className="flex-1 grid grid-cols-11 p-2 gap-1.5 relative bg-slate-50/40">
+                    {/* Background hour slot guidelines */}
+                    <div className="absolute inset-0 grid grid-cols-11 divide-x divide-slate-100 pointer-events-none" />
+
+                    {macAssignments.length === 0 ? (
+                      <div className="col-span-11 flex items-center justify-center text-[11px] text-slate-400 font-medium italic">
+                        No production blocks scheduled for this machine on {formDate}
+                      </div>
+                    ) : (
+                      macAssignments.map((block) => {
+                        const start = Math.max(1, Math.min(11, block.start_hour));
+                        const span = Math.max(1, Math.min(11 - start + 1, block.span_hours));
+                        const blockPct =
+                          block.plan_qty > 0
+                            ? Math.round((block.actual_qty / block.plan_qty) * 100)
+                            : 0;
+
+                        return (
+                          <div
+                            key={block.id}
+                            style={{
+                              gridColumnStart: start,
+                              gridColumnEnd: `span ${span}`,
+                            }}
+                            onClick={() => openEditModal(block)}
+                            className="z-10 group cursor-pointer relative bg-indigo-50 border border-indigo-200 text-indigo-950 rounded-xl p-2 shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden"
+                          >
+                            <div className="flex items-start justify-between gap-1">
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-white bg-indigo-700 px-1 py-0.2 rounded truncate block w-fit mb-0.5">
+                                  {block.style?.client?.name || 'Client'}
+                                </span>
+                                <h6 className="font-black text-[11px] truncate leading-tight">
+                                  {block.style?.style_name || 'Embroidery Task'}
+                                </h6>
+                              </div>
+                              <span className="text-[9px] font-extrabold text-indigo-900 bg-white/80 px-1.5 py-0.5 rounded border border-indigo-200">
+                                {blockPct}%
+                              </span>
+                            </div>
+
+                            <div className="mt-2 pt-1 border-t border-indigo-200/60 flex items-center justify-between text-[10px]">
+                              <span className="font-bold">
+                                Actual:{' '}
+                                <span className="font-black text-indigo-900">
+                                  {block.actual_qty}
+                                </span>
+                              </span>
+                              <span className="text-slate-500 font-semibold">
+                                Target: {block.plan_qty}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
-      {/* Edit Block Modal */}
+      {/* Edit Actual Quantity Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-persian-800 text-white p-4 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h4 className="font-black text-sm flex items-center gap-1.5">
-                  <Edit2 className="w-4 h-4 text-amber-400" />
-                  <span>Update Production Block</span>
+                <h4 className="font-black text-sm uppercase text-slate-800">
+                  Update Production Output
                 </h4>
-                <p className="text-[11px] text-blue-200 mt-0.5">{activeMacId}</p>
+                <p className="text-xs text-slate-500">{editStyleName}</p>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="w-7 h-7 rounded-lg bg-persian-900/50 text-blue-200 hover:text-white flex items-center justify-center"
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="space-y-3">
               <div>
-                <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                  Style Description
+                <label className="block text-xs font-bold text-slate-600 mb-1">
+                  Plan Target Quantity
                 </label>
                 <input
-                  type="text"
-                  value={editStyleName}
-                  onChange={(e) => setEditStyleName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-persian-500"
+                  type="number"
+                  value={editPlanQty}
+                  disabled
+                  className="w-full bg-slate-100 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-600"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                    Plan Target Qty
-                  </label>
-                  <input
-                    type="number"
-                    value={editPlanQty}
-                    onChange={(e) => setEditPlanQty(parseInt(e.target.value) || 0)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-black text-persian-800 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-emerald-700 mb-1">
-                    Actual Done Qty
-                  </label>
-                  <input
-                    type="number"
-                    value={editActualQty}
-                    onChange={(e) => setEditActualQty(parseInt(e.target.value) || 0)}
-                    className="w-full bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs font-black text-emerald-800 outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Actual Completed Pieces *
+                </label>
+                <input
+                  type="number"
+                  value={editActualQty}
+                  onChange={(e) => setEditActualQty(parseInt(e.target.value) || 0)}
+                  min={0}
+                  className="w-full bg-white border-2 border-persian-500 rounded-xl p-2.5 text-sm font-black text-slate-900 outline-none"
+                />
               </div>
+            </div>
 
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleDeleteAssignment}
+                disabled={isUpdating}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold text-xs transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete Block</span>
+              </button>
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={deleteBlock}
-                  className="w-1/3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition-colors flex items-center justify-center gap-1"
+                  onClick={() => setModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-50"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete</span>
+                  Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={updateBlock}
-                  className="w-2/3 py-2.5 rounded-xl bg-persian-800 hover:bg-persian-700 text-white font-bold text-xs shadow-md transition-all"
+                  onClick={handleUpdateActual}
+                  disabled={isUpdating}
+                  className="px-4 py-2 bg-persian-800 hover:bg-persian-700 text-white rounded-xl font-bold text-xs shadow-md"
                 >
-                  Update & Save
+                  {isUpdating ? 'Saving...' : 'Save Actual Output'}
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Machine Crew Assignment Modal */}
+      {crewModalOpen && activeMachine && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-persian-50 text-persian-700 flex items-center justify-center font-bold">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm uppercase text-slate-900">
+                    Assign Machine Crew
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Machine {activeMachine.machine_number.toString().padStart(2, '0')} (
+                    {activeMachine.machine_name})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCrewModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCrew} className="space-y-3.5">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Assigned Machine Operator
+                </label>
+                <select
+                  value={crewOperator}
+                  onChange={(e) => setCrewOperator(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                >
+                  <option value="">-- No Operator Assigned --</option>
+                  {employees
+                    .filter((e) => e.is_active)
+                    .map((emp) => (
+                      <option key={emp.id} value={emp.full_name}>
+                        #{emp.epf_no} • {emp.full_name} ({emp.role})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Registered in Employee Registration
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Assigned Machine Helper
+                </label>
+                <select
+                  value={crewHelper}
+                  onChange={(e) => setCrewHelper(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                >
+                  <option value="">-- No Helper Assigned --</option>
+                  {employees
+                    .filter((e) => e.is_active)
+                    .map((emp) => (
+                      <option key={emp.id} value={emp.full_name}>
+                        #{emp.epf_no} • {emp.full_name} ({emp.role})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Machine Operating Status
+                </label>
+                <select
+                  value={crewStatus}
+                  onChange={(e) =>
+                    setCrewStatus(
+                      e.target.value as 'RUNNING' | 'SETUP' | 'MAINTENANCE' | 'IDLE'
+                    )
+                  }
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                >
+                  <option value="RUNNING">RUNNING (In Production)</option>
+                  <option value="SETUP">SETUP (Hooping & Threading)</option>
+                  <option value="IDLE">IDLE (Standby / No Job)</option>
+                  <option value="MAINTENANCE">MAINTENANCE (Mechanic Repair)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setCrewModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCrew}
+                  className="px-4 py-2 bg-persian-800 hover:bg-persian-700 text-white rounded-xl font-bold text-xs shadow-md shadow-persian-800/20 disabled:opacity-50"
+                >
+                  {isSavingCrew ? 'Saving...' : 'Save Crew Assignment'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

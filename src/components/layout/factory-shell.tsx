@@ -6,17 +6,13 @@ import { usePathname } from 'next/navigation';
 import {
   Factory,
   Tv,
-  CheckCircle2,
-  ShieldAlert,
+  Users,
   Database,
-  Banknote,
-  TrendingUp,
   Menu,
   X,
   Clock,
   Calendar,
   Globe,
-  Layers,
   ChevronRight,
   ExternalLink,
 } from 'lucide-react';
@@ -60,19 +56,19 @@ export function FactoryShell({ children }: FactoryShellProps) {
   // Determine if active view is a TV wallboard
   const isWallboard = pathname.includes('/live');
 
-  // Navigation Links
+  // Navigation Links - Streamlined to Production Planning & Employee Registration
   const navSections = [
     {
       title: 'Production Operations',
       items: [
         {
-          name: 'Production Gantt Matrix',
+          name: 'Production Planning & Matrix',
           href: '/production',
           icon: Factory,
-          badge: '13 Units',
+          badge: 'Scheduler',
         },
         {
-          name: 'Production TV Wallboard',
+          name: 'Floor TV Wallboard',
           href: '/production/live',
           icon: Tv,
           badge: 'Live',
@@ -80,53 +76,24 @@ export function FactoryShell({ children }: FactoryShellProps) {
       ],
     },
     {
-      title: 'Quality & Delivery',
+      title: 'Workforce & Staff',
       items: [
         {
-          name: 'Quality Checking Matrix',
-          href: '/quality',
-          icon: CheckCircle2,
-          badge: '8 Staff',
-        },
-        {
-          name: 'Checking TV Wallboard',
-          href: '/quality/live',
-          icon: Tv,
-          badge: 'Live',
+          name: 'Employee Registration',
+          href: '/employees',
+          icon: Users,
+          badge: 'Staff',
         },
       ],
     },
     {
-      title: 'Technical & Compliance',
+      title: 'Configuration',
       items: [
         {
-          name: 'Needle & Safety (CLN-01)',
-          href: '/needle',
-          icon: ShieldAlert,
-          badge: 'Tesco',
-        },
-        {
-          name: 'Master Data & Strike-Off',
+          name: 'Machines & Styles Setup',
           href: '/master-data',
           icon: Database,
-          badge: 'Formulas',
-        },
-      ],
-    },
-    {
-      title: 'Human Resources & Finance',
-      items: [
-        {
-          name: 'Payroll, Attendance & Slips',
-          href: '/payroll',
-          icon: Banknote,
-          badge: 'Sinhala/EPF',
-        },
-        {
-          name: 'P&L & Machine Revenue',
-          href: '/finance',
-          icon: TrendingUp,
-          badge: 'Multi-FX',
+          badge: 'Specs',
         },
       ],
     },
@@ -314,18 +281,12 @@ export function FactoryShell({ children }: FactoryShellProps) {
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-black text-persian-800 uppercase tracking-tight">
                     {pathname.startsWith('/production')
-                      ? 'Production Management Suite'
-                      : pathname.startsWith('/quality')
-                      ? 'Quality & Checking Suite'
-                      : pathname.startsWith('/needle')
-                      ? 'Needle & Safety Management'
+                      ? 'Production Planning & Matrix'
+                      : pathname.startsWith('/employees')
+                      ? 'Employee Registration & Staff Roster'
                       : pathname.startsWith('/master-data')
-                      ? 'Master Data & Strike-Off Portal'
-                      : pathname.startsWith('/payroll')
-                      ? 'Payroll, Attendance & Statutory'
-                      : pathname.startsWith('/finance')
-                      ? 'Financial Governance & P&L'
-                      : 'Factory Operations Portal'}
+                      ? 'Machines & Styles Master Setup'
+                      : 'Dinusha Factory Operations'}
                   </h2>
                 </div>
                 <p className="text-[11px] text-slate-500 font-medium hidden sm:block">
