@@ -1,108 +1,77 @@
 'use server';
 
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { employeeRepository } from '@/modules/payroll/repositories/employee-repository';
+import { employeeFormSchema, EmployeeFormData } from '@/modules/payroll/domain/validation';
+import { EmployeeEntity } from '@/modules/payroll/domain/entities';
+import { revalidatePath } from 'next/cache';
 
-export interface DbEmployee {
-  id: string;
-  epf_no: number;
-  full_name: string;
-  dob: string | null;
-  gender: string | null;
-  nic: string;
-  address: string | null;
-  phone: string | null;
-  emergency_phone: string | null;
-  role: string;
-  basic_salary: number;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export async function fetchEmployees(): Promise<DbEmployee[]> {
+export async function fetchEmployeesAction(): Promise<{ success: boolean; data?: EmployeeEntity[]; error?: string }> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('employees')
-      .select('*')
-      .order('epf_no', { ascending: true });
-
-    if (error) {
-      console.error('fetchEmployees error:', error);
-      return [];
-    }
-    return data || [];
+    const list = await employeeRepository.getAllEmployees();
+    return { success: true, data: list };
   } catch (err) {
-    console.error('Failed to fetch employees:', err);
-    return [];
+    const message = err instanceof Error ? err.message : 'Failed to fetch employees';
+    return { success: false, error: message };
   }
 }
 
-export async function createEmployee(payload: {
-  epf_no: number;
-  full_name: string;
-  dob?: string | null;
-  gender?: string | null;
-  nic: string;
-  address?: string | null;
-  phone?: string | null;
-  emergency_phone?: string | null;
-  role: string;
-  basic_salary?: number;
-  is_active?: boolean;
-}) {
-  const { data, error } = await supabaseAdmin
-    .from('employees')
-    .insert([
-      {
-        epf_no: payload.epf_no,
-        full_name: payload.full_name,
-        dob: payload.dob || null,
-        gender: payload.gender || null,
-        nic: payload.nic,
-        address: payload.address || null,
-        phone: payload.phone || null,
-        emergency_phone: payload.emergency_phone || null,
-        role: payload.role,
-        basic_salary: payload.basic_salary || 0,
-        is_active: payload.is_active !== undefined ? payload.is_active : true,
-      },
-    ])
-    .select()
-    .single();
+export async function saveEmployeeAction(
+  data: EmployeeFormData,
+  id?: string
+): Promise<{ success: boolean; employee?: EmployeeEntity; error?: string }> {
+  try {
+    const validated = employeeFormSchema.parse(data);
 
-  if (error) throw new Error(error.message);
-  return data;
+    let saved: EmployeeEntity;
+    if (id) {
+      saved = await employeeRepository.updateEmployee(id, validated);
+    } else {
+      saved = await employeeRepository.createEmployee(validated);
+    }
+
+    revalidatePath('/payroll');
+    revalidatePath('/');
+    return { success: true, employee: saved };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Validation failed';
+    return { success: false, error: message };
+  }
 }
 
-export async function updateEmployee(
+export async function deleteEmployeeAction(
   id: string,
-  payload: Partial<{
-    epf_no: number;
-    full_name: string;
-    dob: string | null;
-    gender: string | null;
-    nic: string;
-    address: string | null;
-    phone: string | null;
-    emergency_phone: string | null;
-    role: string;
-    basic_salary: number;
-    is_active: boolean;
-  }>
-) {
-  const { data, error } = await supabaseAdmin
-    .from('employees')
-    .update({ ...payload, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
+  reason: string,
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await employeeRepository.deleteEmployeeWithReason(id, reason, notes);
+    revalidatePath('/payroll');
+    revalidatePath('/');
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete employee';
+    return { success: false, error: message };
+  }
 }
 
-export async function deleteEmployee(id: string) {
-  const { error } = await supabaseAdmin.from('employees').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-  return true;
+export async function updateChecklistAction(
+  id: string,
+  checklist: {
+    hasNicCopy?: boolean;
+    hasBirthCertificate?: boolean;
+    hasGramasewakaCert?: boolean;
+    hasPoliceReport?: boolean;
+    hasMedicalReport?: boolean;
+    hasAppointmentLetter?: boolean;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await employeeRepository.updateEmployee(id, checklist);
+    revalidatePath('/payroll');
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update checklist';
+    return { success: false, error: message };
+  }
 }
+
