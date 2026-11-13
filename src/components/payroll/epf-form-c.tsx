@@ -181,12 +181,12 @@ export function EpfFormC({ employees }: EpfFormCProps) {
                 onChange={(e) => setMonth(e.target.value)}
                 className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
               >
-                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
-                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
-                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
-                <option value="July 2026" className="text-slate-900">July 2026 (ජූලි)</option>
-                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
-                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+                <option value="October 2026" className="text-slate-900">October 2026</option>
+                <option value="September 2026" className="text-slate-900">September 2026</option>
+                <option value="August 2026" className="text-slate-900">August 2026</option>
+                <option value="July 2026" className="text-slate-900">July 2026</option>
+                <option value="November 2026" className="text-slate-900">November 2026</option>
+                <option value="December 2026" className="text-slate-900">December 2026</option>
               </select>
             </div>
 

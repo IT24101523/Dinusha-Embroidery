@@ -16,9 +16,6 @@ import {
   ShieldCheck,
   FileCheck2,
   Building2,
-  Wallet,
-  Landmark,
-  FileCheck,
   Sparkles,
 } from 'lucide-react';
 
@@ -49,39 +46,6 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
     initialEmployees[0]?.id
   );
   const tabIdPrefix = useId();
-
-  const metrics = useMemo(() => {
-    const totalWorkforce = employees.length;
-    const supervisorCount = employees.filter((e) =>
-      e.role.toLowerCase().includes('supervisor')
-    ).length;
-    const totalBasicPayroll = employees.reduce((sum, e) => sum + (e.basicSalary || 0), 0);
-    const avgBasicPayroll =
-      totalWorkforce > 0 ? Math.round(totalBasicPayroll / totalWorkforce) : 0;
-    const estimatedStatutory = Math.round(totalBasicPayroll * 0.23);
-    const fullyCompliantCount = employees.filter(
-      (e) =>
-        e.hasNicCopy &&
-        e.hasBirthCertificate &&
-        e.hasGramasewakaCert &&
-        e.hasPoliceReport &&
-        e.hasMedicalReport &&
-        e.hasAppointmentLetter
-    ).length;
-    const compliancePct =
-      totalWorkforce > 0 ? Math.round((fullyCompliantCount / totalWorkforce) * 100) : 0;
-
-    return {
-      totalWorkforce,
-      supervisorCount,
-      productionCount: Math.max(0, totalWorkforce - supervisorCount),
-      totalBasicPayroll,
-      avgBasicPayroll,
-      estimatedStatutory,
-      fullyCompliantCount,
-      compliancePct,
-    };
-  }, [employees]);
 
   const navItems: NavTabItem[] = useMemo(
     () => [
@@ -317,110 +281,6 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
                 <span className="font-semibold text-slate-700">Payroll Cycle Active</span>
                 <span className="text-slate-400 mx-1.5">•</span>
                 <span className="font-mono text-slate-500">SL EPF/ETF Compliant</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 4 Executive KPI Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-            {/* KPI 1: Workforce */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Total Workforce
-                  </span>
-                  <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                    {metrics.totalWorkforce}
-                  </div>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
-                  <Users className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Supervisors: {metrics.supervisorCount}</span>
-                <span className="font-semibold text-indigo-600">
-                  Production: {metrics.productionCount}
-                </span>
-              </div>
-            </div>
-
-            {/* KPI 2: Monthly Basic Base */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Basic Payroll Base
-                  </span>
-                  <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                    <span className="text-xs font-bold text-slate-400 mr-1">LKR</span>
-                    {metrics.totalBasicPayroll.toLocaleString()}
-                  </div>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0">
-                  <Wallet className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Avg Basic / Staff</span>
-                <span className="font-mono font-bold text-emerald-700">
-                  LKR {metrics.avgBasicPayroll.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            {/* KPI 3: Statutory Commitment */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    EPF 20% + ETF 3% Base
-                  </span>
-                  <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                    <span className="text-xs font-bold text-slate-400 mr-1">LKR</span>
-                    {metrics.estimatedStatutory.toLocaleString()}
-                  </div>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center justify-center shrink-0">
-                  <Landmark className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Employer 15% + Emp 8%</span>
-                <span className="font-semibold text-amber-700">Statutory Est.</span>
-              </div>
-            </div>
-
-            {/* KPI 4: Personal File Compliance */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    File Compliance (6/6)
-                  </span>
-                  <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                    {metrics.fullyCompliantCount}
-                    <span className="text-sm font-bold text-slate-400">
-                      /{metrics.totalWorkforce}
-                    </span>
-                  </div>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 flex items-center justify-center shrink-0">
-                  <FileCheck className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1.5">
-                <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-300"
-                    style={{ width: `${metrics.compliancePct}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500">
-                  <span>Personal File Audits</span>
-                  <span className="text-slate-700">{metrics.compliancePct}% Complete</span>
-                </div>
               </div>
             </div>
           </div>

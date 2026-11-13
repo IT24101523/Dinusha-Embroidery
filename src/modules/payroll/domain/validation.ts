@@ -86,7 +86,7 @@ export const employeeFormSchema = z
       .refine((val) => {
         const age = calculateAgeFromDob(val);
         return age !== null && age >= 16;
-      }, 'Employee must be over 16 years old (වයස අවුරුදු 16 ට වැඩි විය යුතුය)')
+      }, 'Employee must be over 16 years old')
       .refine((val) => {
         const age = calculateAgeFromDob(val);
         return age !== null && age <= 80;

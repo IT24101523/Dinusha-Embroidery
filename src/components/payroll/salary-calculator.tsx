@@ -7,7 +7,12 @@ import {
   monthlySalaryInputSchema,
 } from '@/modules/payroll/domain/validation';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
-import { saveMonthlySalaryAction, fetchSalaryRecordAction } from '@/actions/payroll';
+import {
+  saveMonthlySalaryAction,
+  fetchSalaryRecordAction,
+  updateSalaryPaymentStatusAction,
+} from '@/actions/payroll';
+import { AdminUnlockModal } from './admin-unlock-modal';
 import {
   Save,
   CheckCircle2,
@@ -20,6 +25,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
+  BadgeCheck,
+  Unlock,
+  ShieldAlert,
 } from 'lucide-react';
 
 function clampNumber(raw: string, min: number, max: number): number {
@@ -63,6 +71,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [advance, setAdvance] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [recordStatus, setRecordStatus] = useState<'DRAFT' | 'APPROVED' | 'PAID' | null>(null);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
@@ -113,8 +126,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setLateHours(d.lateHours);
         setUnpaidDays(d.unpaidDays);
         setAdvance(d.advance);
+        setRecordStatus((d.status as 'DRAFT' | 'APPROVED' | 'PAID') || 'APPROVED');
       } else if (isMounted) {
         // Reset to smart defaults for this employee
+        setRecordStatus(null);
         setOtHours(0);
         setSotHours(0);
         setTotAmt(0);
@@ -144,9 +159,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     };
   }, [currentEmployee, month]);
 
+  const isPaidLocked = recordStatus === 'PAID';
   const isAllowanceLocked = unpaidDays > 6;
+  const inputsDisabled = isAllowanceLocked || isPaidLocked;
   const unpaidHours = Number((unpaidDays * 8).toFixed(2));
   const unpaidThresholdPct = Math.min(100, Math.round((unpaidDays / 6) * 100));
+
+  const formatLkr2 = (num: number) =>
+    (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Real-time calculation using pure domain engine
   const calculation: PayrollCalculationBreakdown | null = useMemo(() => {
@@ -199,10 +219,16 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     ? calculation.totalOt + calculation.totalAllowances + calculation.totalSpecialIncentives
     : 0;
 
-  const handleSave = async () => {
-    if (!currentEmployee || !calculation) return;
+  const validateSalaryInput = (): MonthlySalaryInputData | null => {
+    if (!currentEmployee || !calculation) return null;
 
-    setStatusMsg(null);
+    if (isPaidLocked) {
+      setStatusMsg({
+        type: 'error',
+        text: 'This salary has already been marked as PAID and is locked. Admin authorization is required to unlock it before updating.',
+      });
+      return null;
+    }
 
     const inputData: MonthlySalaryInputData = {
       employeeId: currentEmployee.id,
@@ -232,28 +258,91 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         text:
           parsed.error.issues[0]?.message || 'Invalid salary input values. Please check your entries.',
       });
-      return;
+      return null;
     }
 
     if (calculation.totalDeductions > calculation.gross) {
       setStatusMsg({
         type: 'error',
-        text: `Cannot save: Total deductions (LKR ${calculation.totalDeductions.toLocaleString()}) exceed gross earnings (LKR ${calculation.gross.toLocaleString()}). Reduce Salary Advance or absence/late deductions first.`,
+        text: `Cannot save: Total deductions (LKR ${formatLkr2(calculation.totalDeductions)}) exceed gross earnings (LKR ${formatLkr2(calculation.gross)}). Reduce Salary Advance or absence/late deductions first.`,
       });
-      return;
+      return null;
     }
 
+    return parsed.data;
+  };
+
+  const handleSave = async () => {
+    if (!currentEmployee || !calculation) return;
+    setStatusMsg(null);
+
+    const validated = validateSalaryInput();
+    if (!validated) return;
+
     setLoading(true);
-    const res = await saveMonthlySalaryAction(parsed.data);
+    const res = await saveMonthlySalaryAction(validated);
     setLoading(false);
 
     if (res.success && res.breakdown) {
+      setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
       setStatusMsg({
         type: 'success',
-        text: `Successfully calculated & saved ${month} salary for ${currentEmployee.fullName} (Net: LKR ${res.breakdown.net.toLocaleString()})`,
+        text: `Successfully calculated & saved ${month} salary for ${currentEmployee.fullName} (Net: LKR ${formatLkr2(res.breakdown.net)})`,
       });
     } else {
       setStatusMsg({ type: 'error', text: res.error || 'Failed to save salary record.' });
+    }
+  };
+
+  const handleMarkPaid = async () => {
+    if (!currentEmployee || !calculation) return;
+    setStatusMsg(null);
+
+    const validated = validateSalaryInput();
+    if (!validated) return;
+
+    setMarkingPaid(true);
+    const res = await updateSalaryPaymentStatusAction({
+      employeeId: currentEmployee.id,
+      month,
+      targetStatus: 'PAID',
+      salaryInput: validated,
+    });
+    setMarkingPaid(false);
+
+    if (res.success && res.data) {
+      setRecordStatus('PAID');
+      setStatusMsg({
+        type: 'success',
+        text: `Salary marked as PAID & locked for ${currentEmployee.fullName} (${month}). Updates now require Admin Authorization.`,
+      });
+    } else {
+      setStatusMsg({ type: 'error', text: res.error || 'Failed to mark salary as paid.' });
+    }
+  };
+
+  const handleAdminUnlock = async (adminPin: string, adminReason: string) => {
+    if (!currentEmployee) return;
+    setUnlockError(null);
+    setUnlockLoading(true);
+    const res = await updateSalaryPaymentStatusAction({
+      employeeId: currentEmployee.id,
+      month,
+      targetStatus: 'APPROVED',
+      adminPin,
+      adminReason,
+    });
+    setUnlockLoading(false);
+
+    if (res.success && res.data) {
+      setRecordStatus('APPROVED');
+      setUnlockModalOpen(false);
+      setStatusMsg({
+        type: 'success',
+        text: `Salary unlocked via Admin Approval ("${adminReason}"). You can now edit and re-save ${currentEmployee.fullName}'s salary.`,
+      });
+    } else {
+      setUnlockError(res.error || 'Admin authorization failed.');
     }
   };
 
@@ -393,11 +482,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               onChange={(e) => setMonth(e.target.value)}
               className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
             >
-              <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-              <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-              <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-              <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-              <option value="August 2026">August 2026 (අගෝස්තු)</option>
+              <option value="October 2026">October 2026</option>
+              <option value="September 2026">September 2026</option>
+              <option value="November 2026">November 2026</option>
+              <option value="December 2026">December 2026</option>
+              <option value="August 2026">August 2026</option>
             </select>
           </div>
 
@@ -412,6 +501,35 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           </div>
         </div>
       </div>
+
+      {isPaidLocked && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs sm:text-sm flex flex-wrap items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+              <BadgeCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-extrabold text-emerald-950 flex items-center gap-2">
+                SALARY PAID &amp; LOCKED ({month})
+              </div>
+              <p className="text-xs text-emerald-800 mt-0.5">
+                Disbursement has been confirmed. Further updates are blocked unless an Admin unlocks this record.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setUnlockError(null);
+              setUnlockModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-xs cursor-pointer shrink-0"
+          >
+            <ShieldAlert className="w-4 h-4" />
+            Admin Approval to Unlock
+          </button>
+        </div>
+      )}
 
       {isAllowanceLocked && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-3 shadow-xs">
@@ -462,9 +580,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={300}
                   step={0.25}
+                  disabled={isPaidLocked}
                   value={otHours}
                   onChange={(e) => setOtHours(clampNumber(e.target.value, 0, 300))}
-                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
                 <div className="flex items-center justify-between mt-1.5 gap-1">
                   <span className="text-[10px] text-slate-400">
@@ -473,22 +592,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setOtHours((v) => clampNumber(String(v + 1), 0, 300))}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
                       +1h
                     </button>
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setOtHours((v) => clampNumber(String(v + 5), 0, 300))}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
                       +5h
                     </button>
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setOtHours(0)}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 disabled:opacity-40 cursor-pointer"
                     >
                       0
                     </button>
@@ -508,9 +630,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={150}
                   step={0.25}
+                  disabled={isPaidLocked}
                   value={sotHours}
                   onChange={(e) => setSotHours(clampNumber(e.target.value, 0, 150))}
-                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
                 <div className="flex items-center justify-between mt-1.5 gap-1">
                   <span className="text-[10px] text-slate-400">
@@ -519,22 +642,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setSotHours((v) => clampNumber(String(v + 1), 0, 150))}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
                       +1h
                     </button>
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setSotHours((v) => clampNumber(String(v + 4), 0, 150))}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
                       +4h
                     </button>
                     <button
                       type="button"
+                      disabled={isPaidLocked}
                       onClick={() => setSotHours(0)}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 disabled:opacity-40 cursor-pointer"
                     >
                       0
                     </button>
@@ -586,7 +712,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={200000}
                   step={500}
-                  disabled={isAllowanceLocked}
+                  disabled={inputsDisabled}
                   value={isAllowanceLocked ? 0 : attAllow}
                   onChange={(e) => setAttAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -605,14 +731,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
-                      Night Days (දින ගණන)
+                      Night Days
                     </label>
                     <input
                       type="number"
                       min={0}
                       max={31}
                       step={1}
-                      disabled={isAllowanceLocked}
+                      disabled={inputsDisabled}
                       value={isAllowanceLocked ? 0 : nightDays}
                       onChange={(e) => {
                         const days = Math.floor(clampNumber(e.target.value, 0, 31));
@@ -624,14 +750,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   </div>
                   <div>
                     <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
-                      Per Night (එකකට LKR)
+                      Per Night (LKR)
                     </label>
                     <input
                       type="number"
                       min={0}
                       max={25000}
                       step={50}
-                      disabled={isAllowanceLocked}
+                      disabled={inputsDisabled}
                       value={isAllowanceLocked ? 0 : nightRate}
                       onChange={(e) => {
                         const rate = clampNumber(e.target.value, 0, 25000);
@@ -653,7 +779,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={200000}
                   step={500}
-                  disabled={isAllowanceLocked}
+                  disabled={inputsDisabled}
                   value={isAllowanceLocked ? 0 : gradeAllow}
                   onChange={(e) => setGradeAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -669,7 +795,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={200000}
                   step={250}
-                  disabled={isAllowanceLocked}
+                  disabled={inputsDisabled}
                   value={isAllowanceLocked ? 0 : transAllow}
                   onChange={(e) => setTransAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -715,12 +841,12 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Production Allowance / Incentive
                 </label>
-                <input
+                  <input
                   type="number"
                   min={0}
                   max={200000}
                   step={500}
-                  disabled={isAllowanceLocked}
+                  disabled={inputsDisabled}
                   value={isAllowanceLocked ? 0 : prodAllow}
                   onChange={(e) => setProdAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -730,7 +856,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <button
                       key={preset}
                       type="button"
-                      disabled={isAllowanceLocked}
+                      disabled={inputsDisabled}
                       onClick={() => setProdAllow(preset)}
                       className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 hover:bg-emerald-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
@@ -749,7 +875,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={200000}
                   step={250}
-                  disabled={isAllowanceLocked}
+                  disabled={inputsDisabled}
                   value={isAllowanceLocked ? 0 : checkingAllow}
                   onChange={(e) => setCheckingAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -759,7 +885,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <button
                       key={preset}
                       type="button"
-                      disabled={isAllowanceLocked}
+                      disabled={inputsDisabled}
                       onClick={() => setCheckingAllow(preset)}
                       className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 hover:bg-emerald-100 text-slate-700 disabled:opacity-40 cursor-pointer"
                     >
@@ -818,9 +944,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={200}
                   step={0.5}
+                  disabled={isPaidLocked}
                   value={lateHours}
                   onChange={(e) => setLateHours(clampNumber(e.target.value, 0, 200))}
-                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -836,33 +963,35 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
-                      Days (දින)
+                      Days
                     </label>
                     <input
                       type="number"
                       min={0}
                       max={25}
                       step={0.5}
+                      disabled={isPaidLocked}
                       value={unpaidDays}
                       onChange={(e) => setUnpaidDays(clampNumber(e.target.value, 0, 25))}
-                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
-                      Hours (පැය)
+                      Hours
                     </label>
                     <input
                       type="number"
                       min={0}
                       max={200}
                       step={1}
+                      disabled={isPaidLocked}
                       value={unpaidHours}
                       onChange={(e) => {
                         const hrs = clampNumber(e.target.value, 0, 200);
                         setUnpaidDays(Math.min(25, Number((hrs / 8).toFixed(2))));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -896,9 +1025,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   min={0}
                   max={300000}
                   step={500}
+                  disabled={isPaidLocked}
                   value={advance}
                   onChange={(e) => setAdvance(clampNumber(e.target.value, 0, 300000))}
-                  className={`w-full px-3 py-2 text-sm font-mono font-semibold border rounded-xl focus:outline-hidden focus:ring-2 ${
+                  className={`w-full px-3 py-2 text-sm font-mono font-semibold border rounded-xl focus:outline-hidden focus:ring-2 disabled:bg-slate-100 disabled:cursor-not-allowed ${
                     hasExcessDeductions
                       ? 'border-rose-500 focus:ring-rose-500 bg-rose-50/40'
                       : 'border-slate-300 focus:ring-rose-500'
@@ -917,61 +1047,116 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         </div>
       </div>
 
-      {/* Financial Command Summary Footer */}
-      <div className="bg-slate-950 text-white p-5 sm:p-6 rounded-2xl shadow-xl border border-slate-800 flex flex-wrap items-center justify-between gap-6">
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-5 flex-1 min-w-[280px]">
-          <div>
-            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+      {/* Sharp & Simple Financial Summary Bar */}
+      <div className="bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-lg border border-slate-800 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 divide-y-0 sm:divide-x sm:divide-slate-800">
+          <div className="pr-2">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
               Basic Salary
             </span>
-            <span className="text-base sm:text-lg font-mono font-bold text-slate-100 mt-0.5 block">
-              LKR {calculation?.basic.toLocaleString() || '0.00'}
+            <span className="text-sm sm:text-base font-mono font-bold text-slate-100 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.basic || 0)}
             </span>
           </div>
-          <div>
-            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+
+          <div className="sm:pl-6 pr-2">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
               Additions
             </span>
-            <span className="text-base sm:text-lg font-mono font-bold text-indigo-300 mt-0.5 block">
-              +LKR {totalAdditions.toLocaleString()}
+            <span className="text-sm sm:text-base font-mono font-bold text-indigo-300 whitespace-nowrap">
+              +LKR {formatLkr2(totalAdditions)}
             </span>
           </div>
-          <div>
-            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
-              Gross Earnings (දළ)
+
+          <div className="sm:pl-6 pr-2">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+              Gross Salary
             </span>
-            <span className="text-base sm:text-lg font-mono font-bold text-amber-400 mt-0.5 block">
-              LKR {calculation?.gross.toLocaleString() || '0.00'}
-            </span>
-          </div>
-          <div>
-            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
-              Deductions (අඩුකිරීම්)
-            </span>
-            <span className="text-base sm:text-lg font-mono font-bold text-rose-400 mt-0.5 block">
-              -LKR {calculation?.totalDeductions.toLocaleString() || '0.00'}
+            <span className="text-sm sm:text-base font-mono font-bold text-amber-300 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.gross || 0)}
             </span>
           </div>
-          <div className="col-span-2 sm:col-span-4 lg:col-span-1 bg-emerald-500/15 border border-emerald-400/30 rounded-xl px-3.5 py-2">
-            <span className="text-[10px] text-emerald-300 block uppercase font-bold tracking-wider">
-              Net Salary (ශුද්ධ වැටුප)
+
+          <div className="sm:pl-6 pr-2">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+              Deductions
             </span>
-            <span className="text-xl font-mono font-black text-emerald-400 tracking-tight">
-              LKR {calculation?.net.toLocaleString() || '0.00'}
+            <span className="text-sm sm:text-base font-mono font-bold text-rose-400 whitespace-nowrap">
+              -LKR {formatLkr2(calculation?.totalDeductions || 0)}
+            </span>
+          </div>
+
+          <div className="sm:pl-6">
+            <span className="text-[10px] text-emerald-400 block uppercase font-bold tracking-wider">
+              Net Salary
+            </span>
+            <span className="text-lg sm:text-xl font-mono font-black text-emerald-400 tracking-tight whitespace-nowrap">
+              LKR {formatLkr2(calculation?.net || 0)}
             </span>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={loading}
-          className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm transition flex items-center gap-2 shadow-lg shadow-indigo-950/50 disabled:opacity-50 cursor-pointer shrink-0"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          Save &amp; Update Salary
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {isPaidLocked ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs font-bold whitespace-nowrap">
+                <Lock className="w-3.5 h-3.5" />
+                Paid &amp; Locked
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setUnlockError(null);
+                  setUnlockModalOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Unlock className="w-3.5 h-3.5" />
+                Admin Unlock
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={loading || markingPaid}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save &amp; Update Salary
+              </button>
+              <button
+                type="button"
+                onClick={handleMarkPaid}
+                disabled={loading || markingPaid}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                {markingPaid ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <BadgeCheck className="w-4 h-4" />
+                )}
+                Mark Paid &amp; Lock
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {unlockModalOpen && (
+        <AdminUnlockModal
+          isOpen={unlockModalOpen}
+          employeeName={currentEmployee.fullName}
+          epfNo={currentEmployee.epfNo}
+          month={month}
+          netSalary={calculation?.net}
+          loading={unlockLoading}
+          errorMsg={unlockError}
+          onClose={() => setUnlockModalOpen(false)}
+          onConfirm={handleAdminUnlock}
+        />
+      )}
     </div>
   );
 }

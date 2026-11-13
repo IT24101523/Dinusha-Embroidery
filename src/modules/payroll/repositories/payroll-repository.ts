@@ -73,7 +73,7 @@ export class PayrollRepository {
       advance: breakdown.advance,
       total_deductions: breakdown.totalDeductions,
       net: breakdown.net,
-      status: 'APPROVED',
+      status: breakdown.status || 'APPROVED',
       updated_at: new Date().toISOString(),
     };
 
@@ -85,6 +85,30 @@ export class PayrollRepository {
       console.error('[PayrollRepository] savePayrollRecord error:', error);
       throw new Error(`Failed to save salary: ${error.message}`);
     }
+  }
+
+  async updateRecordStatus(
+    employeeId: string,
+    month: string,
+    status: 'APPROVED' | 'PAID'
+  ): Promise<PayrollCalculationBreakdown> {
+    const { data, error } = await supabaseAdmin
+      .from('payroll_records')
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('employee_id', employeeId)
+      .eq('month', month)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      console.error('[PayrollRepository] updateRecordStatus error:', error);
+      throw new Error(`Failed to update salary payment status: ${error?.message || 'Record not found'}`);
+    }
+
+    return this.mapToBreakdown(data);
   }
 
   async deleteRecord(id: string): Promise<void> {
@@ -159,6 +183,7 @@ export class PayrollRepository {
       advance: Number(row.advance || 0),
       totalDeductions: Number(row.total_deductions || 0),
       net: Number(row.net || 0),
+      status: String(row.status || 'APPROVED'),
     };
   }
 }

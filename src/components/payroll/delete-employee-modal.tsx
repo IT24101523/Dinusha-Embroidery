@@ -13,14 +13,14 @@ interface DeleteEmployeeModalProps {
 }
 
 const DELETION_REASONS = [
-  'Resigned (ඉල්ලා අස්වීම)',
-  'Terminated / Dismissed (සේවයෙන් පහ කිරීම)',
-  'Left without notice / Deserted (දැනුම්දීමකින් තොරව සේවය හැරයාම)',
-  'End of Contract (ගිවිසුම අවසන් වීම)',
-  'Retirement (විශ්‍රාම යාම)',
-  'Medical Reasons (අසනීප තත්ත්ව මත)',
-  'Registration Error (වැරදි ලියාපදිංචියක්)',
-  'Other (වෙනත් හේතුවක්)',
+  'Resigned',
+  'Terminated / Dismissed',
+  'Left without notice / Deserted',
+  'End of Contract',
+  'Retirement',
+  'Medical Reasons',
+  'Registration Error',
+  'Other',
 ];
 
 export function DeleteEmployeeModal({
@@ -117,7 +117,7 @@ export function DeleteEmployeeModal({
             </div>
             <div>
               <h3 id="delete-modal-title" className="text-base font-bold text-white">
-                Confirm Employee Removal (සේවකයා ඉවත් කිරීම)
+                Confirm Employee Removal
               </h3>
               <p className="text-xs text-rose-100 mt-0.5">
                 Audit-logged deactivation from active factory payroll records
@@ -187,7 +187,7 @@ export function DeleteEmployeeModal({
               htmlFor="removal-reason-select"
               className="block text-xs font-bold text-slate-700"
             >
-              Reason for Removal (ඉවත් කිරීමට හේතුව) *
+              Reason for Removal *
             </label>
             <select
               id="removal-reason-select"
@@ -209,7 +209,7 @@ export function DeleteEmployeeModal({
               htmlFor="removal-notes-input"
               className="block text-xs font-bold text-slate-700"
             >
-              Additional Details / Reference Notes (අමතර සටහන්)
+              Additional Details / Reference Notes
             </label>
             <textarea
               id="removal-notes-input"
@@ -244,7 +244,7 @@ export function DeleteEmployeeModal({
             onClick={onClose}
             className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition cursor-pointer"
           >
-            Cancel (අවලංගු කරන්න)
+            Cancel
           </button>
           <button
             type="button"

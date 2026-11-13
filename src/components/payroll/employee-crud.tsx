@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useId } from 'react';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import {
   EmployeeFormData,
@@ -27,6 +27,8 @@ import {
   Sparkles,
   UserCheck,
   ShieldAlert,
+  Users,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface EmployeeCrudProps {
@@ -138,6 +140,8 @@ export function EmployeeCrud({
   onOpenCalculator,
 }: EmployeeCrudProps) {
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
+  const [subTab, setSubTab] = useState<'directory' | 'form'>('directory');
+  const subTabIdPrefix = useId();
   const [formData, setFormData] = useState<EmployeeFormData>(DEFAULT_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [employeeToDelete, setEmployeeToDelete] = useState<EmployeeEntity | null>(null);
@@ -292,6 +296,7 @@ export function EmployeeCrud({
       isActive: emp.isActive,
       photoUrl: emp.photoUrl || '',
     });
+    setSubTab('form');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -361,6 +366,7 @@ export function EmployeeCrud({
         : [...employees, saved].sort((a, b) => a.epfNo - b.epfNo);
       setEmployees(next);
       resetForm();
+      setSubTab('directory');
       setStatusMsg({
         type: 'success',
         text: `Employee ${saved.fullName} ${editingId ? 'updated' : 'registered'} successfully.`,
@@ -373,7 +379,7 @@ export function EmployeeCrud({
 
   const docCheckboxes: { key: keyof EmployeeFormData; label: string }[] = [
     { key: 'hasNicCopy', label: 'NIC / ID Copy' },
-    { key: 'hasBirthCertificate', label: 'Birth Certificate (උප්පැන්න)' },
+    { key: 'hasBirthCertificate', label: 'Birth Certificate' },
     { key: 'hasGramasewakaCert', label: 'Grama Niladhari Cert' },
     { key: 'hasPoliceReport', label: 'Police Report' },
     { key: 'hasMedicalReport', label: 'Medical Certificate' },
@@ -399,49 +405,139 @@ export function EmployeeCrud({
         </div>
       )}
 
-      {/* Main Split Studio: Left Form Studio (5 cols) | Right Interactive Directory (7 cols) */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* Left: Onboarding / Edit Form Studio */}
-        <div className="xl:col-span-5 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+      {/* Dedicated 2-Tab Navigation Bar: Directory vs Register / Edit */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 p-1.5 shadow-xs flex flex-wrap items-center justify-between gap-2">
+        <div
+          role="tablist"
+          aria-label="Employee workspace views"
+          className="tablist-scroller flex items-center gap-1.5"
+        >
+          <button
+            type="button"
+            role="tab"
+            id={`${subTabIdPrefix}-directory`}
+            aria-selected={subTab === 'directory'}
+            onClick={() => setSubTab('directory')}
+            className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              subTab === 'directory'
+                ? 'bg-slate-900 text-white shadow-sm after:content-[""] after:absolute after:inset-x-4 after:bottom-1 after:border-b-2 after:border-indigo-400'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Registered Employee Directory</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                subTab === 'directory'
+                  ? 'bg-white/15 text-white'
+                  : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {employees.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            id={`${subTabIdPrefix}-form`}
+            aria-selected={subTab === 'form'}
+            onClick={() => setSubTab('form')}
+            className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              subTab === 'form'
+                ? 'bg-slate-900 text-white shadow-sm after:content-[""] after:absolute after:inset-x-4 after:bottom-1 after:border-b-2 after:border-indigo-400'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>{editingId ? 'Edit Employee Record' : 'Register / Edit Employee'}</span>
+            {editingId && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/30 text-indigo-100 border border-indigo-400/40">
+                EPF #{formData.epfNo}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {subTab === 'directory' ? (
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setSubTab('form');
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-xs cursor-pointer"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Register New Employee
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSubTab('directory')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to Directory
+          </button>
+        )}
+      </div>
+
+      {/* Tab 2: Onboarding / Edit Form Studio */}
+      {subTab === 'form' && (
+        <div
+          role="tabpanel"
+          aria-labelledby={`${subTabIdPrefix}-form`}
+          className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+        >
           {/* Dark Gradient Studio Header */}
-          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-5 py-4 flex items-center justify-between gap-3">
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-6 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-                <UserPlus className="w-4 h-4 text-indigo-300" />
+              <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                <UserPlus className="w-5 h-5 text-indigo-300" />
               </div>
               <div>
-                <h3 className="text-sm font-bold tracking-tight flex items-center gap-2">
-                  {editingId ? 'Edit Employee Record' : 'Register / Edit Employee'}
+                <h3 className="text-base font-bold tracking-tight flex items-center gap-2">
+                  {editingId ? 'Edit Employee Record' : 'Register New Employee'}
                   {editingId && (
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-indigo-500/30 border border-indigo-400/40 text-indigo-100">
                       EPF #{formData.epfNo}
                     </span>
                   )}
                 </h3>
-                <p className="text-[11px] text-slate-300">
-                  Validated 16+ age verification, SL NIC & photo capture
+                <p className="text-xs text-slate-300">
+                  Validated 16+ age verification, Sri Lankan NIC cross-check &amp; photo capture
                 </p>
               </div>
             </div>
 
-            {editingId && (
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                >
+                  New Entry
+                </button>
+              )}
               <button
                 type="button"
-                onClick={resetForm}
-                className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                onClick={() => setSubTab('directory')}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
               >
-                New Entry
+                View Directory
               </button>
-            )}
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} noValidate className="p-5 space-y-5">
+          <form onSubmit={handleSubmit} noValidate className="p-6 space-y-6">
             {/* Employee Photo Upload Studio */}
             <div className="p-4 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/60 via-white to-slate-50">
               <div className="flex items-center justify-between mb-2.5">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  Employee Photo (සේවක ඡායාරූපය)
+                  Employee Photo
                 </label>
                 <span className="text-[10px] font-mono font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                   240x240px Auto-Crop
@@ -516,10 +612,10 @@ export function EmployeeCrud({
                 <div className="h-px bg-slate-100 flex-1" />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Initials (මුලකුරු) *
+                    Initials *
                   </label>
                   <input
                     type="text"
@@ -552,7 +648,7 @@ export function EmployeeCrud({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Surname (වාසගම) *
+                    Surname *
                   </label>
                   <input
                     type="text"
@@ -889,7 +985,7 @@ export function EmployeeCrud({
                 <div>
                   <label className="block text-xs font-semibold text-indigo-700 mb-1 flex items-center gap-1">
                     <Calendar className="w-3.5 h-3.5" />
-                    Date of Joining (වැඩට ආපු දවස)
+                    Date of Joining
                   </label>
                   <input
                     type="date"
@@ -912,7 +1008,7 @@ export function EmployeeCrud({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Bank (සේවක බැංකුව)
+                    Bank Name
                   </label>
                   <input
                     type="text"
@@ -933,7 +1029,7 @@ export function EmployeeCrud({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Account No (ගිණුම් අංකය)
+                    Bank Account Number
                   </label>
                   <input
                     type="text"
@@ -961,7 +1057,7 @@ export function EmployeeCrud({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-950 uppercase tracking-wide">
                   <FileCheck className="w-4 h-4 text-amber-700" />
-                  Personal File Checklist (පුද්ගලික ලිපිගොනු)
+                  Personal File Checklist
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white border border-amber-300 text-amber-900">
                   {formDocCount}/6 Verified
@@ -1012,7 +1108,10 @@ export function EmployeeCrud({
               </button>
               <button
                 type="button"
-                onClick={resetForm}
+                onClick={() => {
+                  resetForm();
+                  setSubTab('directory');
+                }}
                 className="py-2.5 px-4 rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-100 transition cursor-pointer"
               >
                 Cancel
@@ -1020,9 +1119,15 @@ export function EmployeeCrud({
             </div>
           </form>
         </div>
+      )}
 
-        {/* Right: Interactive Workforce Directory (7 cols) */}
-        <div className="xl:col-span-7 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+      {/* Tab 1: Interactive Workforce Directory */}
+      {subTab === 'directory' && (
+        <div
+          role="tabpanel"
+          aria-labelledby={`${subTabIdPrefix}-directory`}
+          className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+        >
           <div className="p-5 border-b border-slate-100 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1033,9 +1138,11 @@ export function EmployeeCrud({
                   Quick search, compliance audit &amp; direct jump to monthly payroll calculation
                 </p>
               </div>
-              <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Showing {filteredEmployees.length} of {employees.length}
-              </span>
+              <div className="flex items-center gap-2.5">
+                <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Showing {filteredEmployees.length} of {employees.length}
+                </span>
+              </div>
             </div>
 
             {/* Interactive Search & Filters Toolbar */}
@@ -1302,7 +1409,7 @@ export function EmployeeCrud({
             </table>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Dedicated Native Dialog Removal Confirmation Modal */}
       {employeeToDelete && (

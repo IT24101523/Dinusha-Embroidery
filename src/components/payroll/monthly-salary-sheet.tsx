@@ -3,9 +3,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
-import { fetchMonthlyRecordsAction } from '@/actions/payroll';
+import { fetchMonthlyRecordsAction, updateSalaryPaymentStatusAction } from '@/actions/payroll';
 import { exportToExcel } from '@/modules/payroll/domain/epf-etf-utils';
-import { Printer, Calendar, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { AdminUnlockModal } from './admin-unlock-modal';
+import {
+  Printer,
+  Calendar,
+  FileSpreadsheet,
+  Loader2,
+  BadgeCheck,
+  Lock,
+  Unlock,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 
 interface MonthlySalarySheetProps {
   employees: EmployeeEntity[];
@@ -15,6 +27,13 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
   const [month, setMonth] = useState<string>('October 2026');
   const [savedRecords, setSavedRecords] = useState<Record<string, PayrollCalculationBreakdown>>({});
   const [loading, setLoading] = useState<boolean>(false);
+  const [actionEmpId, setActionEmpId] = useState<string | null>(null);
+  const [unlockTarget, setUnlockTarget] = useState<PayrollCalculationBreakdown | null>(null);
+  const [unlockLoading, setUnlockLoading] = useState<boolean>(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -171,6 +190,57 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
     return (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  const paidCount = useMemo(
+    () => rows.filter((r) => r.status === 'PAID').length,
+    [rows]
+  );
+
+  const handleMarkPaid = async (row: PayrollCalculationBreakdown) => {
+    setStatusMsg(null);
+    setActionEmpId(row.employeeId);
+    const res = await updateSalaryPaymentStatusAction({
+      employeeId: row.employeeId,
+      month,
+      targetStatus: 'PAID',
+    });
+    setActionEmpId(null);
+
+    if (res.success && res.data) {
+      setSavedRecords((prev) => ({ ...prev, [row.employeeId]: res.data! }));
+      setStatusMsg({
+        type: 'success',
+        text: `Marked ${row.name}'s ${month} salary as PAID & locked. Further edits now require Admin Authorization.`,
+      });
+    } else {
+      setStatusMsg({ type: 'error', text: res.error || 'Failed to update payment status.' });
+    }
+  };
+
+  const handleAdminUnlock = async (adminPin: string, adminReason: string) => {
+    if (!unlockTarget) return;
+    setUnlockError(null);
+    setUnlockLoading(true);
+    const res = await updateSalaryPaymentStatusAction({
+      employeeId: unlockTarget.employeeId,
+      month,
+      targetStatus: 'APPROVED',
+      adminPin,
+      adminReason,
+    });
+    setUnlockLoading(false);
+
+    if (res.success && res.data) {
+      setSavedRecords((prev) => ({ ...prev, [unlockTarget.employeeId]: res.data! }));
+      setStatusMsg({
+        type: 'success',
+        text: `Unlocked ${unlockTarget.name}'s ${month} salary via Admin Approval ("${adminReason}").`,
+      });
+      setUnlockTarget(null);
+    } else {
+      setUnlockError(res.error || 'Admin authorization failed.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Control Bar & Summary Strip (hidden during print) */}
@@ -199,12 +269,12 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
                 onChange={(e) => setMonth(e.target.value)}
                 className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
               >
-                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
-                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
-                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
-                <option value="July 2026" className="text-slate-900">July 2026 (ජූලි)</option>
-                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
-                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+                <option value="October 2026" className="text-slate-900">October 2026</option>
+                <option value="September 2026" className="text-slate-900">September 2026</option>
+                <option value="August 2026" className="text-slate-900">August 2026</option>
+                <option value="July 2026" className="text-slate-900">July 2026</option>
+                <option value="November 2026" className="text-slate-900">November 2026</option>
+                <option value="December 2026" className="text-slate-900">December 2026</option>
               </select>
             </div>
 
@@ -263,6 +333,23 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
         </div>
       </div>
 
+      {statusMsg && (
+        <div
+          className={`p-4 rounded-2xl text-sm flex items-center gap-3 shadow-xs border print:hidden ${
+            statusMsg.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}
+        >
+          {statusMsg.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+          )}
+          <span className="font-medium">{statusMsg.text}</span>
+        </div>
+      )}
+
       {loading && (
         <div className="flex items-center justify-center p-6 text-slate-500 text-xs gap-2 print:hidden">
           <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
@@ -270,8 +357,10 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
         </div>
       )}
 
-      {/* Salary Sheet Container (Exact Replica of Image 1 - Optimized for A4 Landscape Print) */}
-      <div className="salary-sheet-container bg-white p-6 rounded-xl border border-slate-300 shadow-sm overflow-x-auto print:border-none print:shadow-none print:p-0 print:m-0 print:overflow-visible">
+      {/* Main Split Workspace: Left Official Master Salary Sheet | Right Side Payment Status & Lock Panel */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start print:block">
+        {/* Left: Official Master Salary Sheet (Optimized for A4 Landscape Print) */}
+        <div className="xl:col-span-9 salary-sheet-container bg-white p-6 rounded-xl border border-slate-300 shadow-sm overflow-x-auto print:w-full print:border-none print:shadow-none print:p-0 print:m-0 print:overflow-visible">
         <style dangerouslySetInnerHTML={{
           __html: `
             @page {
@@ -426,6 +515,118 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
           </tbody>
         </table>
       </div>
+
+        {/* Right: Companion Salary Payment & Lock Status Panel (Hidden during Print) */}
+        <aside className="xl:col-span-3 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden xl:sticky xl:top-4">
+          <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                Payment &amp; Lock Status
+              </h2>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                Mark Paid to lock salary updates
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+              {paidCount}/{rows.length} Paid
+            </span>
+          </div>
+
+          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto scrollbar-thin">
+            {rows.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">
+                No active employees found for {month}.
+              </div>
+            ) : (
+              rows.map((r) => {
+                const isPaid = r.status === 'PAID';
+                const isBusy = actionEmpId === r.employeeId;
+
+                return (
+                  <div key={r.employeeId} className="p-3.5 space-y-2.5 hover:bg-slate-50/80 transition">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                            #{r.epfNo}
+                          </span>
+                          <span className="text-xs font-bold text-slate-900 truncate">
+                            {r.name}
+                          </span>
+                        </div>
+                        <div className="text-xs font-mono font-extrabold text-slate-700 mt-1">
+                          Net: LKR {formatLkr(r.net)}
+                        </div>
+                      </div>
+
+                      {isPaid ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                          <BadgeCheck className="w-3 h-3" />
+                          PAID
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                          <Clock className="w-3 h-3" />
+                          PENDING
+                        </span>
+                      )}
+                    </div>
+
+                    {isPaid ? (
+                      <div className="flex items-center justify-between gap-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl px-2.5 py-1.5">
+                        <span className="text-[10px] font-semibold text-emerald-800 flex items-center gap-1">
+                          <Lock className="w-3 h-3" />
+                          Salary Locked
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUnlockError(null);
+                            setUnlockTarget(r);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold transition cursor-pointer"
+                        >
+                          <Unlock className="w-3 h-3" />
+                          Admin Unlock
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleMarkPaid(r)}
+                        className="w-full py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                      >
+                        {isBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <BadgeCheck className="w-3.5 h-3.5" />
+                        )}
+                        Mark as Paid &amp; Lock
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      </div>
+
+      {unlockTarget && (
+        <AdminUnlockModal
+          isOpen={!!unlockTarget}
+          employeeName={unlockTarget.name}
+          epfNo={unlockTarget.epfNo}
+          month={month}
+          netSalary={unlockTarget.net}
+          loading={unlockLoading}
+          errorMsg={unlockError}
+          onClose={() => setUnlockTarget(null)}
+          onConfirm={handleAdminUnlock}
+        />
+      )}
     </div>
   );
 }

@@ -106,5 +106,6 @@ export interface PayrollCalculationBreakdown {
   totalDeductions: number;
   // Net
   net: number;
+  status?: 'DRAFT' | 'APPROVED' | 'PAID' | string;
 }
 
