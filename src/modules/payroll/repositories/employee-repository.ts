@@ -60,6 +60,7 @@ export class EmployeeRepository {
           account_no: payload.accountNo || null,
           basic_salary: payload.basicSalary,
           joined_date: payload.joinedDate || null,
+          photo_url: payload.photoUrl || null,
           has_nic_copy: payload.hasNicCopy ?? false,
           has_birth_certificate: payload.hasBirthCertificate ?? false,
           has_gramasewaka_cert: payload.hasGramasewakaCert ?? false,
@@ -102,6 +103,7 @@ export class EmployeeRepository {
     if (payload.accountNo !== undefined) updateData.account_no = payload.accountNo;
     if (payload.basicSalary !== undefined) updateData.basic_salary = payload.basicSalary;
     if (payload.joinedDate !== undefined) updateData.joined_date = payload.joinedDate;
+    if (payload.photoUrl !== undefined) updateData.photo_url = payload.photoUrl;
     if (payload.hasNicCopy !== undefined) updateData.has_nic_copy = payload.hasNicCopy;
     if (payload.hasBirthCertificate !== undefined) updateData.has_birth_certificate = payload.hasBirthCertificate;
     if (payload.hasGramasewakaCert !== undefined) updateData.has_gramasewaka_cert = payload.hasGramasewakaCert;
@@ -173,6 +175,7 @@ export class EmployeeRepository {
       accountNo: row.account_no ? String(row.account_no) : null,
       basicSalary: Number(row.basic_salary || 0),
       joinedDate: row.joined_date ? String(row.joined_date) : null,
+      photoUrl: row.photo_url ? String(row.photo_url) : null,
       hasNicCopy: Boolean(row.has_nic_copy),
       hasBirthCertificate: Boolean(row.has_birth_certificate),
       hasGramasewakaCert: Boolean(row.has_gramasewaka_cert),

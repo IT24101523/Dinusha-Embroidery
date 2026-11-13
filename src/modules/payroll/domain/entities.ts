@@ -17,6 +17,7 @@ export interface EmployeeEntity {
   accountNo?: string | null;
   basicSalary: number;
   joinedDate?: string | null; // Date joined (wadata apu dawasa)
+  photoUrl?: string | null;
   // Personal File Compliance Checklist
   hasNicCopy: boolean; // ID copy
   hasBirthCertificate: boolean; // Upath sahathikaya

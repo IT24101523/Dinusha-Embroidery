@@ -19,6 +19,7 @@ export const employees = pgTable('employees', {
   accountNo: varchar('account_no', { length: 100 }),
   basicSalary: numeric('basic_salary', { precision: 12, scale: 2 }).notNull().default('0.00'),
   joinedDate: date('joined_date'),
+  photoUrl: text('photo_url'),
   // Personal File Compliance Checklist
   hasNicCopy: boolean('has_nic_copy').notNull().default(false),
   hasBirthCertificate: boolean('has_birth_certificate').notNull().default(false),

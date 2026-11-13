@@ -2,9 +2,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
-import { MonthlySalaryInputData } from '@/modules/payroll/domain/validation';
+import {
+  MonthlySalaryInputData,
+  monthlySalaryInputSchema,
+} from '@/modules/payroll/domain/validation';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { saveMonthlySalaryAction, fetchSalaryRecordAction } from '@/actions/payroll';
+
+function clampNumber(raw: string, min: number, max: number): number {
+  if (raw.trim() === '') return min;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || Number.isNaN(num)) return min;
+  return Math.min(max, Math.max(min, num));
+}
 import {
   Calculator,
   Save,
@@ -166,10 +176,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     advance,
   ]);
 
+  const hasExcessDeductions = calculation ? calculation.totalDeductions > calculation.gross : false;
+
   const handleSave = async () => {
     if (!currentEmployee || !calculation) return;
 
-    setLoading(true);
     setStatusMsg(null);
 
     const inputData: MonthlySalaryInputData = {
@@ -193,7 +204,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       advance,
     };
 
-    const res = await saveMonthlySalaryAction(inputData);
+    const parsed = monthlySalaryInputSchema.safeParse(inputData);
+    if (!parsed.success) {
+      setStatusMsg({
+        type: 'error',
+        text: parsed.error.issues[0]?.message || 'Invalid salary input values. Please check your entries.',
+      });
+      return;
+    }
+
+    if (calculation.totalDeductions > calculation.gross) {
+      setStatusMsg({
+        type: 'error',
+        text: `Cannot save: Total deductions (LKR ${calculation.totalDeductions.toLocaleString()}) exceed gross earnings (LKR ${calculation.gross.toLocaleString()}). Reduce Salary Advance or absence/late deductions first.`,
+      });
+      return;
+    }
+
+    setLoading(true);
+    const res = await saveMonthlySalaryAction(parsed.data);
     setLoading(false);
 
     if (res.success && res.breakdown) {
@@ -269,17 +298,31 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           <label className="block text-xs font-semibold text-slate-700 mb-1">
             Select Employee *
           </label>
-          <select
-            value={currentEmployee.id}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
-          >
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                EPF {emp.epfNo} - {emp.fullName} ({emp.role})
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3">
+            {currentEmployee.photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={currentEmployee.photoUrl}
+                alt={currentEmployee.fullName}
+                className="w-11 h-11 rounded-full object-cover border-2 border-indigo-200 shrink-0 shadow-xs"
+              />
+            ) : (
+              <div className="w-11 h-11 rounded-full bg-indigo-50 text-indigo-700 border-2 border-indigo-200 flex items-center justify-center text-sm font-bold shrink-0">
+                {(currentEmployee.initials || currentEmployee.fullName || '?').slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <select
+              value={currentEmployee.id}
+              onChange={(e) => setSelectedId(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
+            >
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  EPF {emp.epfNo} - {emp.fullName} ({emp.role})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Month Selector */}
@@ -320,6 +363,15 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         </div>
       )}
 
+      {hasExcessDeductions && (
+        <div className="p-3.5 rounded-xl bg-amber-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-xs">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+          <span>
+            Warning: Total Deductions (LKR {calculation?.totalDeductions.toLocaleString()}) exceed Gross Earnings (LKR {calculation?.gross.toLocaleString()}). Reduce Salary Advance or absence/late hours to save this record.
+          </span>
+        </div>
+      )}
+
       {/* 4 Cards Grid (Exact replica of Image 3) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: OVERTIME & HOURS */}
@@ -340,13 +392,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={300}
                   step={0.25}
                   value={otHours}
-                  onChange={(e) => setOtHours(Number(e.target.value))}
+                  onChange={(e) => setOtHours(clampNumber(e.target.value, 0, 300))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
                 <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  Rate: LKR {calculation?.otRate || 0}/hr
+                  Rate: LKR {calculation?.otRate || 0}/hr (Max 300 hrs)
                 </span>
               </div>
 
@@ -357,13 +410,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={150}
                   step={0.25}
                   value={sotHours}
-                  onChange={(e) => setSotHours(Number(e.target.value))}
+                  onChange={(e) => setSotHours(clampNumber(e.target.value, 0, 150))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
                 <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  Rate: LKR {calculation?.sotRate || 0}/hr
+                  Rate: LKR {calculation?.sotRate || 0}/hr (Max 150 hrs)
                 </span>
               </div>
             </div>
@@ -404,10 +458,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200000}
                   step={500}
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : attAllow}
-                  onChange={(e) => setAttAllow(Number(e.target.value))}
+                  onChange={(e) => setAttAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
@@ -429,13 +484,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
+                      max={31}
                       step={1}
                       disabled={isAllowanceLocked}
                       value={isAllowanceLocked ? 0 : nightDays}
                       onChange={(e) => {
-                        const days = Math.max(0, Number(e.target.value) || 0);
+                        const days = Math.floor(clampNumber(e.target.value, 0, 31));
                         setNightDays(days);
-                        setNightAllow(Number((days * nightRate).toFixed(2)));
+                        setNightAllow(Math.min(200000, Number((days * nightRate).toFixed(2))));
                       }}
                       className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
@@ -447,13 +503,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
+                      max={25000}
                       step={50}
                       disabled={isAllowanceLocked}
                       value={isAllowanceLocked ? 0 : nightRate}
                       onChange={(e) => {
-                        const rate = Math.max(0, Number(e.target.value) || 0);
+                        const rate = clampNumber(e.target.value, 0, 25000);
                         setNightRate(rate);
-                        setNightAllow(Number((nightDays * rate).toFixed(2)));
+                        setNightAllow(Math.min(200000, Number((nightDays * rate).toFixed(2))));
                       }}
                       className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
@@ -468,10 +525,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200000}
                   step={500}
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : gradeAllow}
-                  onChange={(e) => setGradeAllow(Number(e.target.value))}
+                  onChange={(e) => setGradeAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
@@ -483,10 +541,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200000}
                   step={250}
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : transAllow}
-                  onChange={(e) => setTransAllow(Number(e.target.value))}
+                  onChange={(e) => setTransAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
@@ -528,10 +587,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200000}
                   step={500}
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : prodAllow}
-                  onChange={(e) => setProdAllow(Number(e.target.value))}
+                  onChange={(e) => setProdAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
                 <span className="text-[11px] text-slate-400 mt-0.5 block">
@@ -546,10 +606,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200000}
                   step={250}
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : checkingAllow}
-                  onChange={(e) => setCheckingAllow(Number(e.target.value))}
+                  onChange={(e) => setCheckingAllow(clampNumber(e.target.value, 0, 200000))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
@@ -596,9 +657,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={200}
                   step={0.5}
                   value={lateHours}
-                  onChange={(e) => setLateHours(Number(e.target.value))}
+                  onChange={(e) => setLateHours(clampNumber(e.target.value, 0, 200))}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500"
                 />
                 {calculation && calculation.lateDeduction > 0 && (
@@ -620,9 +682,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
+                      max={25}
                       step={0.5}
                       value={unpaidDays}
-                      onChange={(e) => setUnpaidDays(Math.max(0, Number(e.target.value) || 0))}
+                      onChange={(e) => setUnpaidDays(clampNumber(e.target.value, 0, 25))}
                       className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
                     />
                   </div>
@@ -633,15 +696,19 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
+                      max={200}
                       step={1}
                       value={unpaidHours}
-                      onChange={(e) => setUnpaidDays(Math.max(0, Number(((Number(e.target.value) || 0) / 8).toFixed(2))))}
+                      onChange={(e) => {
+                        const hrs = clampNumber(e.target.value, 0, 200);
+                        setUnpaidDays(Math.min(25, Number((hrs / 8).toFixed(2))));
+                      }}
                       className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
                     />
                   </div>
                 </div>
                 <span className="text-[10px] text-slate-500 block">
-                  Max 6 Days (48 Hours) before Allowances/Incentives lock
+                  Max 6 Days (48 Hours) before Allowances/Incentives lock (limit 25 days)
                 </span>
                 {calculation && calculation.unpaidDeduction > 0 && (
                   <span className="text-[11px] font-semibold text-rose-600 block">
@@ -657,10 +724,15 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
+                  max={300000}
                   step={500}
                   value={advance}
-                  onChange={(e) => setAdvance(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                  onChange={(e) => setAdvance(clampNumber(e.target.value, 0, 300000))}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-hidden focus:ring-2 ${
+                    hasExcessDeductions
+                      ? 'border-rose-500 focus:ring-rose-500 bg-rose-50/30'
+                      : 'border-slate-300 focus:ring-rose-500'
+                  }`}
                 />
               </div>
             </div>

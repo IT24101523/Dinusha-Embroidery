@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.employees (
   account_no VARCHAR(100),
   basic_salary NUMERIC(12,2) NOT NULL DEFAULT 0.00,
   joined_date DATE,
+  photo_url TEXT,
   has_nic_copy BOOLEAN NOT NULL DEFAULT false,
   has_birth_certificate BOOLEAN NOT NULL DEFAULT false,
   has_gramasewaka_cert BOOLEAN NOT NULL DEFAULT false,
@@ -40,6 +41,7 @@ ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS grade VARCHAR(50);
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100);
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS account_no VARCHAR(100);
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS joined_date DATE;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS photo_url TEXT;
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS has_nic_copy BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS has_birth_certificate BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS has_gramasewaka_cert BOOLEAN NOT NULL DEFAULT false;

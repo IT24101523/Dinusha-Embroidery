@@ -1,7 +1,7 @@
 'use server';
 
 import { employeeRepository } from '@/modules/payroll/repositories/employee-repository';
-import { employeeFormSchema, EmployeeFormData } from '@/modules/payroll/domain/validation';
+import { employeeFormSchema, EmployeeFormData, formatZodError } from '@/modules/payroll/domain/validation';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { revalidatePath } from 'next/cache';
 
@@ -33,8 +33,7 @@ export async function saveEmployeeAction(
     revalidatePath('/');
     return { success: true, employee: saved };
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Validation failed';
-    return { success: false, error: message };
+    return { success: false, error: formatZodError(err) };
   }
 }
 

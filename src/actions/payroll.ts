@@ -2,7 +2,7 @@
 
 import { employeeRepository } from '@/modules/payroll/repositories/employee-repository';
 import { payrollRepository } from '@/modules/payroll/repositories/payroll-repository';
-import { monthlySalaryInputSchema, MonthlySalaryInputData } from '@/modules/payroll/domain/validation';
+import { monthlySalaryInputSchema, MonthlySalaryInputData, formatZodError } from '@/modules/payroll/domain/validation';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
 import { revalidatePath } from 'next/cache';
@@ -41,8 +41,7 @@ export async function saveMonthlySalaryAction(
     revalidatePath('/');
     return { success: true, breakdown };
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to calculate and save salary';
-    return { success: false, error: message };
+    return { success: false, error: formatZodError(err) };
   }
 }
 
