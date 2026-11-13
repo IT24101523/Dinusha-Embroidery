@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
-import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { fetchMonthlyRecordsAction, updateSalaryPaymentStatusAction } from '@/actions/payroll';
 import { exportToExcel } from '@/modules/payroll/domain/epf-etf-utils';
 import { AdminUnlockModal } from './admin-unlock-modal';
@@ -14,7 +13,6 @@ import {
   BadgeCheck,
   Lock,
   Unlock,
-  Clock,
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
@@ -39,6 +37,8 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
     let isMounted = true;
     async function loadRecords() {
       setLoading(true);
+      setStatusMsg(null);
+      setSavedRecords({});
       const res = await fetchMonthlyRecordsAction(month);
       if (isMounted) {
         if (res.success && res.data) {
@@ -58,39 +58,13 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
     };
   }, [month]);
 
-  // Generate breakdown for each active employee
+  // Show ONLY employees whose monthly salary has actually been calculated & saved for the selected month
   const rows = useMemo(() => {
     return employees
-      .filter((e) => e.isActive)
+      .filter((e) => e.isActive && Boolean(savedRecords[e.id]))
       .sort((a, b) => a.epfNo - b.epfNo)
-      .map((emp) => {
-        if (savedRecords[emp.id]) {
-          return savedRecords[emp.id];
-        }
-
-        const isSupervisor = emp.role.includes('Supervisor');
-        return calculateSalaryForEmployee(emp, {
-          employeeId: emp.id,
-          month,
-          basicSalary: emp.basicSalary,
-          otHours: isSupervisor ? 98.75 : 0,
-          sotHours: 0,
-          totAmt: 0,
-          poyaDayAmt: 0,
-          sundayAmt: 0,
-          specialLeaveAmt: 0,
-          attAllow: 5000,
-          nightAllow: 0,
-          gradeAllow: isSupervisor ? 35000 : 0,
-          transAllow: 3750,
-          prodAllow: isSupervisor ? 20000 : 0,
-          checkingAllow: 0,
-          lateHours: 0,
-          unpaidDays: 0,
-          advance: 0,
-        });
-      });
-  }, [employees, savedRecords, month]);
+      .map((emp) => savedRecords[emp.id]);
+  }, [employees, savedRecords]);
 
   // Totals calculations
   const totals = useMemo(() => {
@@ -302,9 +276,11 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-slate-50/70">
           <div className="bg-white rounded-xl border border-slate-200/80 p-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-              Active Employees
+              Calculated Salaries
             </span>
-            <span className="text-lg font-mono font-black text-slate-900">{rows.length}</span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              {rows.length} <span className="text-xs font-semibold text-emerald-700">({paidCount} Paid)</span>
+            </span>
           </div>
           <div className="bg-white rounded-xl border border-slate-200/80 p-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
@@ -357,10 +333,8 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
         </div>
       )}
 
-      {/* Main Split Workspace: Left Official Master Salary Sheet | Right Side Payment Status & Lock Panel */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start print:block">
-        {/* Left: Official Master Salary Sheet (Optimized for A4 Landscape Print) */}
-        <div className="xl:col-span-9 salary-sheet-container bg-white p-6 rounded-xl border border-slate-300 shadow-sm overflow-x-auto print:w-full print:border-none print:shadow-none print:p-0 print:m-0 print:overflow-visible">
+      {/* Full-Width Official Master Salary Sheet (Optimized for A4 Landscape Print) */}
+      <div className="salary-sheet-container bg-white p-6 rounded-xl border border-slate-300 shadow-sm overflow-x-auto print:w-full print:border-none print:shadow-none print:p-0 print:m-0 print:overflow-visible">
         <style dangerouslySetInnerHTML={{
           __html: `
             @page {
@@ -438,8 +412,8 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
           </h4>
         </div>
 
-        {/* Master Table - 19 columns with exact proportional percentages summing to 100% */}
-        <table className="salary-sheet-table w-full text-left border-collapse border border-black text-[10px] leading-tight table-fixed">
+        {/* Master Table - 19 printable columns + inline on-screen Payment Status column */}
+        <table className="salary-sheet-table w-full text-left border-collapse border border-black text-[10px] leading-tight table-auto print:table-fixed">
           <thead>
             <tr className="bg-slate-100 text-black font-bold border-b border-black text-center">
               <th className="border border-black py-1 px-0.5 w-[3%]">NO</th>
@@ -467,151 +441,119 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
               <th className="border border-black py-1 px-0.5 w-[5%]">No Pay</th>
               <th className="border border-black py-1 px-0.5 w-[6.5%] font-black">Net Sal</th>
               <th className="border border-black py-1 px-1 w-[10%]">Sign</th>
+              <th className="border border-black py-1 px-2 text-center print:hidden whitespace-nowrap">
+                Salary Status
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black font-mono text-[9.5px]">
-            {rows.map((r) => (
-              <tr key={r.employeeId} className="hover:bg-slate-50">
-                <td className="border border-black py-0.5 px-0.5 text-center font-bold">{r.epfNo}</td>
-                <td className="border border-black py-0.5 px-1 font-sans font-medium text-left truncate" title={r.name}>
-                  {r.name}
-                </td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.basic)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.prodAllow)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.gradeAllow)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.attAllow)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.transAllow)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-center font-semibold">
-                  {r.otHours.toFixed(2)}
-                </td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.otAmt)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-center">{r.sotHours.toFixed(2)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.sotAmt)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right font-bold bg-amber-50/30">
-                  {formatLkr(r.gross)}
-                </td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.epf8)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-center">{r.lateHours.toFixed(2)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.lateDeduction)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-center">{r.unpaidDays.toFixed(2)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.unpaidDeduction)}</td>
-                <td className="border border-black py-0.5 px-0.5 text-right font-black text-black bg-emerald-50/40 text-[10px]">
-                  {formatLkr(r.net)}
-                </td>
-                <td className="border border-black py-0.5 px-1"></td>
-              </tr>
-            ))}
-
-            {/* Bottom Total Summary Row - Only Net Sal total shown */}
-            <tr className="bg-slate-200 font-bold border-t-2 border-black text-black text-[9.5px]">
-              <td colSpan={17} className="border border-black py-1.5 px-2 text-right font-black uppercase tracking-wider">
-                TOTAL NET SALARY ({rows.length} Employees)
-              </td>
-              <td className="border border-black py-1.5 px-0.5 text-right font-black text-emerald-950 bg-emerald-100/60 text-[10.5px]">
-                {formatLkr(totals.net)}
-              </td>
-              <td className="border border-black py-1.5 px-1"></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-        {/* Right: Companion Salary Payment & Lock Status Panel (Hidden during Print) */}
-        <aside className="xl:col-span-3 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden xl:sticky xl:top-4">
-          <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between gap-2">
-            <div>
-              <h2 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                Payment &amp; Lock Status
-              </h2>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                Mark Paid to lock salary updates
-              </p>
-            </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-              {paidCount}/{rows.length} Paid
-            </span>
-          </div>
-
-          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto scrollbar-thin">
             {rows.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-500">
-                No active employees found for {month}.
-              </div>
+              <tr>
+                <td
+                  colSpan={20}
+                  className="border border-black py-10 px-4 text-center font-sans text-xs text-slate-600 bg-slate-50/70"
+                >
+                  {loading
+                    ? `Loading calculated salaries for ${month}...`
+                    : `No salaries have been calculated and saved for ${month} yet. Open the Salary Calculator tab to calculate & save salaries for this month.`}
+                </td>
+              </tr>
             ) : (
               rows.map((r) => {
                 const isPaid = r.status === 'PAID';
                 const isBusy = actionEmpId === r.employeeId;
 
                 return (
-                  <div key={r.employeeId} className="p-3.5 space-y-2.5 hover:bg-slate-50/80 transition">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                            #{r.epfNo}
-                          </span>
-                          <span className="text-xs font-bold text-slate-900 truncate">
-                            {r.name}
-                          </span>
-                        </div>
-                        <div className="text-xs font-mono font-extrabold text-slate-700 mt-1">
-                          Net: LKR {formatLkr(r.net)}
-                        </div>
-                      </div>
-
+                  <tr
+                    key={r.employeeId}
+                    className={isPaid ? 'bg-emerald-50/25 hover:bg-emerald-50/40' : 'hover:bg-slate-50'}
+                  >
+                    <td className="border border-black py-0.5 px-0.5 text-center font-bold">{r.epfNo}</td>
+                    <td
+                      className="border border-black py-0.5 px-1 font-sans font-medium text-left truncate"
+                      title={r.name}
+                    >
+                      {r.name}
+                    </td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.basic)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.prodAllow)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.gradeAllow)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.attAllow)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.transAllow)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-center font-semibold">
+                      {r.otHours.toFixed(2)}
+                    </td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.otAmt)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-center">{r.sotHours.toFixed(2)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.sotAmt)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right font-bold bg-amber-50/30">
+                      {formatLkr(r.gross)}
+                    </td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.epf8)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-center">{r.lateHours.toFixed(2)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.lateDeduction)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-center">{r.unpaidDays.toFixed(2)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right">{formatLkr(r.unpaidDeduction)}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-right font-black text-black bg-emerald-50/40 text-[10px]">
+                      {formatLkr(r.net)}
+                    </td>
+                    <td className="border border-black py-0.5 px-1"></td>
+                    <td className="border border-black py-1 px-1.5 text-center font-sans print:hidden whitespace-nowrap">
                       {isPaid ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
-                          <BadgeCheck className="w-3 h-3" />
-                          PAID
-                        </span>
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold">
+                            <Lock className="w-3 h-3" />
+                            PAID
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUnlockError(null);
+                              setUnlockTarget(r);
+                            }}
+                            title="Admin Approval Required to Unlock"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold transition cursor-pointer"
+                          >
+                            <Unlock className="w-3 h-3" />
+                            Unlock
+                          </button>
+                        </div>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
-                          <Clock className="w-3 h-3" />
-                          PENDING
-                        </span>
-                      )}
-                    </div>
-
-                    {isPaid ? (
-                      <div className="flex items-center justify-between gap-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl px-2.5 py-1.5">
-                        <span className="text-[10px] font-semibold text-emerald-800 flex items-center gap-1">
-                          <Lock className="w-3 h-3" />
-                          Salary Locked
-                        </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            setUnlockError(null);
-                            setUnlockTarget(r);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold transition cursor-pointer"
+                          disabled={isBusy}
+                          onClick={() => handleMarkPaid(r)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
                         >
-                          <Unlock className="w-3 h-3" />
-                          Admin Unlock
+                          {isBusy ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <BadgeCheck className="w-3 h-3" />
+                          )}
+                          Mark Paid
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() => handleMarkPaid(r)}
-                        className="w-full py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
-                      >
-                        {isBusy ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <BadgeCheck className="w-3.5 h-3.5" />
-                        )}
-                        Mark as Paid &amp; Lock
-                      </button>
-                    )}
-                  </div>
+                      )}
+                    </td>
+                  </tr>
                 );
               })
             )}
-          </div>
-        </aside>
+
+            {/* Bottom Total Summary Row - Only Net Sal total shown */}
+            <tr className="bg-slate-200 font-bold border-t-2 border-black text-black text-[9.5px]">
+              <td colSpan={17} className="border border-black py-1.5 px-2 text-right font-black uppercase tracking-wider">
+                TOTAL NET SALARY ({rows.length} Calculated)
+              </td>
+              <td className="border border-black py-1.5 px-0.5 text-right font-black text-emerald-950 bg-emerald-100/60 text-[10.5px]">
+                {formatLkr(totals.net)}
+              </td>
+              <td className="border border-black py-1.5 px-1"></td>
+              <td className="border border-black py-1.5 px-1.5 text-center font-sans text-[10px] font-bold text-slate-700 print:hidden whitespace-nowrap">
+                {paidCount} / {rows.length} Paid
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {unlockTarget && (

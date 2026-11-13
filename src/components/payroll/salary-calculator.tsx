@@ -71,7 +71,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [advance, setAdvance] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
-  const [markingPaid, setMarkingPaid] = useState(false);
   const [recordStatus, setRecordStatus] = useState<'DRAFT' | 'APPROVED' | 'PAID' | null>(null);
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
@@ -291,33 +290,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       });
     } else {
       setStatusMsg({ type: 'error', text: res.error || 'Failed to save salary record.' });
-    }
-  };
-
-  const handleMarkPaid = async () => {
-    if (!currentEmployee || !calculation) return;
-    setStatusMsg(null);
-
-    const validated = validateSalaryInput();
-    if (!validated) return;
-
-    setMarkingPaid(true);
-    const res = await updateSalaryPaymentStatusAction({
-      employeeId: currentEmployee.id,
-      month,
-      targetStatus: 'PAID',
-      salaryInput: validated,
-    });
-    setMarkingPaid(false);
-
-    if (res.success && res.data) {
-      setRecordStatus('PAID');
-      setStatusMsg({
-        type: 'success',
-        text: `Salary marked as PAID & locked for ${currentEmployee.fullName} (${month}). Updates now require Admin Authorization.`,
-      });
-    } else {
-      setStatusMsg({ type: 'error', text: res.error || 'Failed to mark salary as paid.' });
     }
   };
 
@@ -670,10 +642,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-blue-50/70 p-3 rounded-xl flex items-center justify-between">
-            <span className="text-[11px] font-bold text-blue-800 uppercase">Total Overtime</span>
-            <span className="text-base font-mono font-black text-blue-950">
-              LKR {calculation?.totalOt.toLocaleString() || '0.00'}
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-blue-50/70 p-3 rounded-xl flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-blue-800 uppercase whitespace-nowrap">Total Overtime</span>
+            <span className="text-sm sm:text-base font-mono font-black text-blue-950 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.totalOt || 0)}
             </span>
           </div>
         </div>
@@ -804,10 +776,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-amber-50/70 p-3 rounded-xl flex items-center justify-between">
-            <span className="text-[11px] font-bold text-amber-800 uppercase">Total Allowances</span>
-            <span className="text-base font-mono font-black text-amber-950">
-              LKR {calculation?.totalAllowances.toLocaleString() || '0.00'}
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-amber-50/70 p-3 rounded-xl flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-amber-800 uppercase whitespace-nowrap">Total Allowances</span>
+            <span className="text-sm sm:text-base font-mono font-black text-amber-950 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.totalAllowances || 0)}
             </span>
           </div>
         </div>
@@ -897,10 +869,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-emerald-50/70 p-3 rounded-xl flex items-center justify-between">
-            <span className="text-[11px] font-bold text-emerald-800 uppercase">Total Incentives</span>
-            <span className="text-base font-mono font-black text-emerald-950">
-              LKR {calculation?.totalSpecialIncentives.toLocaleString() || '0.00'}
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-emerald-50/70 p-3 rounded-xl flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-emerald-800 uppercase whitespace-nowrap">Total Incentives</span>
+            <span className="text-sm sm:text-base font-mono font-black text-emerald-950 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.totalSpecialIncentives || 0)}
             </span>
           </div>
         </div>
@@ -1038,59 +1010,59 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-rose-50/70 p-3 rounded-xl flex items-center justify-between">
-            <span className="text-[11px] font-bold text-rose-800 uppercase">Total Deductions</span>
-            <span className="text-base font-mono font-black text-rose-950">
-              LKR {calculation?.totalDeductions.toLocaleString() || '0.00'}
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-rose-50/70 p-3 rounded-xl flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-rose-800 uppercase whitespace-nowrap">Total Deductions</span>
+            <span className="text-sm sm:text-base font-mono font-black text-rose-950 whitespace-nowrap">
+              LKR {formatLkr2(calculation?.totalDeductions || 0)}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Sharp & Simple Financial Summary Bar */}
-      <div className="bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-lg border border-slate-800 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 divide-y-0 sm:divide-x sm:divide-slate-800">
-          <div className="pr-2">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+      {/* Sharp Single-Row Financial Summary Bar */}
+      <div className="bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-lg border border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-5 xl:gap-x-6 gap-y-3 sm:divide-x sm:divide-slate-800 min-w-0">
+          <div className="pr-1">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Basic Salary
             </span>
-            <span className="text-sm sm:text-base font-mono font-bold text-slate-100 whitespace-nowrap">
+            <span className="text-sm font-mono font-bold text-slate-100 whitespace-nowrap">
               LKR {formatLkr2(calculation?.basic || 0)}
             </span>
           </div>
 
-          <div className="sm:pl-6 pr-2">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+          <div className="sm:pl-5 xl:pl-6 pr-1">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Additions
             </span>
-            <span className="text-sm sm:text-base font-mono font-bold text-indigo-300 whitespace-nowrap">
+            <span className="text-sm font-mono font-bold text-indigo-300 whitespace-nowrap">
               +LKR {formatLkr2(totalAdditions)}
             </span>
           </div>
 
-          <div className="sm:pl-6 pr-2">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+          <div className="sm:pl-5 xl:pl-6 pr-1">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Gross Salary
             </span>
-            <span className="text-sm sm:text-base font-mono font-bold text-amber-300 whitespace-nowrap">
+            <span className="text-sm font-mono font-bold text-amber-300 whitespace-nowrap">
               LKR {formatLkr2(calculation?.gross || 0)}
             </span>
           </div>
 
-          <div className="sm:pl-6 pr-2">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">
+          <div className="sm:pl-5 xl:pl-6 pr-1">
+            <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Deductions
             </span>
-            <span className="text-sm sm:text-base font-mono font-bold text-rose-400 whitespace-nowrap">
+            <span className="text-sm font-mono font-bold text-rose-400 whitespace-nowrap">
               -LKR {formatLkr2(calculation?.totalDeductions || 0)}
             </span>
           </div>
 
-          <div className="sm:pl-6">
-            <span className="text-[10px] text-emerald-400 block uppercase font-bold tracking-wider">
+          <div className="sm:pl-5 xl:pl-6">
+            <span className="text-[10px] text-emerald-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Net Salary
             </span>
-            <span className="text-lg sm:text-xl font-mono font-black text-emerald-400 tracking-tight whitespace-nowrap">
+            <span className="text-base xl:text-lg font-mono font-black text-emerald-400 tracking-tight whitespace-nowrap">
               LKR {formatLkr2(calculation?.net || 0)}
             </span>
           </div>
@@ -1116,30 +1088,15 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               </button>
             </>
           ) : (
-            <>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={loading || markingPaid}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
-              >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save &amp; Update Salary
-              </button>
-              <button
-                type="button"
-                onClick={handleMarkPaid}
-                disabled={loading || markingPaid}
-                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
-              >
-                {markingPaid ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <BadgeCheck className="w-4 h-4" />
-                )}
-                Mark Paid &amp; Lock
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={loading}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save &amp; Update Salary
+            </button>
           )}
         </div>
       </div>
