@@ -47,6 +47,10 @@ export function EtfReturn({ employees }: EtfReturnProps) {
     return etfRows.reduce((sum, r) => sum + r.etf3, 0);
   }, [etfRows]);
 
+  const totalBasicEarnings = useMemo(() => {
+    return etfRows.reduce((sum, r) => sum + r.basicEarnings, 0);
+  }, [etfRows]);
+
   const handleExportExcel = () => {
     const excelData = etfRows.map((r) => ({
       'Member Number': r.memberNo,
@@ -77,60 +81,92 @@ export function EtfReturn({ employees }: EtfReturnProps) {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Control Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-                EMPLOYEES’ TRUST FUND (ETF 3%) RETURN
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                {month}
-              </span>
+      {/* Top Studio Header & Summary Cards (Hidden on Print) */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-amber-950/90 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-300 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-500">
-              Official monthly ETF contribution schedule & Excel upload format (Image 2)
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-extrabold tracking-tight text-white">
+                  EMPLOYEES&apos; TRUST FUND (ETF 3%) RETURN
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-400/20 text-amber-200 border border-amber-400/30">
+                  {month}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Official monthly ETF 3% statutory remittance schedule &amp; Excel generator
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3.5 py-2 rounded-xl border border-white/15 text-xs font-semibold text-white">
+              <Calendar className="w-4 h-4 text-amber-300" />
+              <span className="text-slate-300">Month:</span>
+              <select
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
+              >
+                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
+                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
+                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
+                <option value="July 2026" className="text-slate-900">July 2026 (ජූලි)</option>
+                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
+                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Generate ETF Excel (.xlsx)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              Print ETF Return
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <span>Month:</span>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="bg-transparent border-none text-slate-900 font-bold focus:outline-hidden"
-            >
-              <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-              <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-              <option value="August 2026">August 2026 (අගෝස්තු)</option>
-              <option value="July 2026">July 2026 (ජූලි)</option>
-              <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-              <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-            </select>
+        {/* 3 Executive Stat Tiles */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50/70">
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Total Contributing Members
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              {etfRows.length} Members
+            </span>
           </div>
-
-          <button
-            onClick={handleExportExcel}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            Generate ETF Excel (.xlsx)
-          </button>
-
-          <button
-            onClick={() => window.print()}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <Printer className="w-4 h-4 text-amber-400" />
-            Print ETF Return
-          </button>
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Total Contributory Earnings
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              LKR {formatLkr(totalBasicEarnings)}
+            </span>
+          </div>
+          <div className="bg-amber-50/70 rounded-xl border border-amber-200 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
+              Total ETF 3% Remittance
+            </span>
+            <span className="text-lg font-mono font-black text-amber-950">
+              LKR {formatLkr(totalEtf)}
+            </span>
+          </div>
         </div>
       </div>
 

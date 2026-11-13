@@ -8,15 +8,7 @@ import {
 } from '@/modules/payroll/domain/validation';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { saveMonthlySalaryAction, fetchSalaryRecordAction } from '@/actions/payroll';
-
-function clampNumber(raw: string, min: number, max: number): number {
-  if (raw.trim() === '') return min;
-  const num = Number(raw);
-  if (!Number.isFinite(num) || Number.isNaN(num)) return min;
-  return Math.min(max, Math.max(min, num));
-}
 import {
-  Calculator,
   Save,
   CheckCircle2,
   AlertCircle,
@@ -25,7 +17,17 @@ import {
   Gift,
   MinusCircle,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Lock,
 } from 'lucide-react';
+
+function clampNumber(raw: string, min: number, max: number): number {
+  if (raw.trim() === '') return min;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || Number.isNaN(num)) return min;
+  return Math.min(max, Math.max(min, num));
+}
 
 interface SalaryCalculatorProps {
   employees: EmployeeEntity[];
@@ -33,10 +35,12 @@ interface SalaryCalculatorProps {
 }
 
 export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalculatorProps) {
-  const [selectedId, setSelectedId] = useState<string>(selectedEmployeeId || (employees[0]?.id || ''));
+  const [selectedId, setSelectedId] = useState<string>(
+    selectedEmployeeId || employees[0]?.id || ''
+  );
   const [month, setMonth] = useState<string>('October 2026');
 
-  // Input states matching Image 3 & Image 2
+  // Input states
   const [otHours, setOtHours] = useState<number>(0);
   const [sotHours, setSotHours] = useState<number>(0);
   const [totAmt, setTotAmt] = useState<number>(0);
@@ -59,12 +63,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [advance, setAdvance] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  );
 
   // Active employee
   const currentEmployee = useMemo(() => {
     return employees.find((e) => e.id === selectedId) || employees[0] || null;
   }, [employees, selectedId]);
+
+  const currentIndex = useMemo(() => {
+    if (!currentEmployee) return -1;
+    return employees.findIndex((e) => e.id === currentEmployee.id);
+  }, [employees, currentEmployee]);
+
+  const handleCycleEmployee = (direction: -1 | 1) => {
+    if (employees.length === 0 || currentIndex === -1) return;
+    const nextIdx = (currentIndex + direction + employees.length) % employees.length;
+    setSelectedId(employees[nextIdx].id);
+  };
 
   // Load existing salary record when employee or month changes
   useEffect(() => {
@@ -129,6 +146,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
   const isAllowanceLocked = unpaidDays > 6;
   const unpaidHours = Number((unpaidDays * 8).toFixed(2));
+  const unpaidThresholdPct = Math.min(100, Math.round((unpaidDays / 6) * 100));
 
   // Real-time calculation using pure domain engine
   const calculation: PayrollCalculationBreakdown | null = useMemo(() => {
@@ -177,6 +195,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   ]);
 
   const hasExcessDeductions = calculation ? calculation.totalDeductions > calculation.gross : false;
+  const totalAdditions = calculation
+    ? calculation.totalOt + calculation.totalAllowances + calculation.totalSpecialIncentives
+    : 0;
 
   const handleSave = async () => {
     if (!currentEmployee || !calculation) return;
@@ -208,7 +229,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     if (!parsed.success) {
       setStatusMsg({
         type: 'error',
-        text: parsed.error.issues[0]?.message || 'Invalid salary input values. Please check your entries.',
+        text:
+          parsed.error.issues[0]?.message || 'Invalid salary input values. Please check your entries.',
       });
       return;
     }
@@ -237,84 +259,122 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
   if (!currentEmployee) {
     return (
-      <div className="bg-white p-8 rounded-xl border border-slate-200 text-center">
-        <p className="text-slate-600">Please register employees first in the Employee Master CRUD tab.</p>
+      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center shadow-xs">
+        <p className="text-slate-600 font-medium">
+          Please register employees first in the Employee Master CRUD tab.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner (Matches Image 3) */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap justify-between items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold">
-            <Calculator className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-                MONTHLY SALARY CALCULATOR & UPDATER
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                {month}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500">
-              Individual staff salary calculation, Sri Lankan statutory EPF/ETF & allowance orchestration
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            Deductions Fixed: Strictly Zero Unless Entered
-          </span>
-        </div>
-      </div>
-
+    <div className="space-y-5">
       {statusMsg && (
         <div
-          className={`p-3.5 rounded-lg text-sm flex items-center gap-2 ${
+          className={`p-4 rounded-2xl text-sm flex items-center gap-3 shadow-xs border ${
             statusMsg.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-              : 'bg-rose-50 text-rose-800 border border-rose-200'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
           }`}
         >
           {statusMsg.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
           ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
           )}
-          <span>{statusMsg.text}</span>
+          <span className="font-medium">{statusMsg.text}</span>
         </div>
       )}
 
-      {/* Selectors Bar (Matches Image 3 top row) */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-        {/* Employee Dropdown */}
-        <div className="md:col-span-5">
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Select Employee *
-          </label>
-          <div className="flex items-center gap-3">
+      {/* Employee Command Hero & Selector Studio */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
             {currentEmployee.photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={currentEmployee.photoUrl}
                 alt={currentEmployee.fullName}
-                className="w-11 h-11 rounded-full object-cover border-2 border-indigo-200 shrink-0 shadow-xs"
+                className="w-14 h-14 rounded-2xl object-cover border-2 border-indigo-400/60 shrink-0 shadow-md"
               />
             ) : (
-              <div className="w-11 h-11 rounded-full bg-indigo-50 text-indigo-700 border-2 border-indigo-200 flex items-center justify-center text-sm font-bold shrink-0">
-                {(currentEmployee.initials || currentEmployee.fullName || '?').slice(0, 2).toUpperCase()}
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/30 text-indigo-100 border border-indigo-400/40 flex items-center justify-center text-lg font-black shrink-0 shadow-md">
+                {(currentEmployee.initials || currentEmployee.fullName || '?')
+                  .slice(0, 2)
+                  .toUpperCase()}
               </div>
             )}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-indigo-500/30 border border-indigo-400/40 text-indigo-100">
+                  EPF #{currentEmployee.epfNo}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-white/10 text-slate-200">
+                  {currentEmployee.role}
+                </span>
+                <span className="text-[11px] font-mono text-slate-300">{currentEmployee.nic}</span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-extrabold text-white tracking-tight truncate mt-1">
+                {currentEmployee.fullName}
+              </h3>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Employer Statutory Preview Tiles */}
+            <div className="hidden sm:flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 rounded-xl px-3.5 py-2 text-xs">
+              <div>
+                <span className="text-[10px] text-slate-300 block uppercase">Employer EPF 12%</span>
+                <span className="font-mono font-bold text-indigo-200">
+                  LKR {calculation?.epf12.toLocaleString() || '0'}
+                </span>
+              </div>
+              <div className="w-px h-7 bg-white/15 mx-1" />
+              <div>
+                <span className="text-[10px] text-slate-300 block uppercase">Employer ETF 3%</span>
+                <span className="font-mono font-bold text-emerald-300">
+                  LKR {calculation?.etf3.toLocaleString() || '0'}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Prev/Next Employee Stepper */}
+            <div className="flex items-center gap-1 bg-slate-950/60 border border-white/15 rounded-xl p-1">
+              <button
+                type="button"
+                onClick={() => handleCycleEmployee(-1)}
+                title="Previous Employee"
+                aria-label="Previous Employee"
+                className="p-2 rounded-lg text-slate-200 hover:bg-white/15 hover:text-white transition cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-2 text-[11px] font-mono text-slate-300">
+                {currentIndex + 1}/{employees.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCycleEmployee(1)}
+                title="Next Employee"
+                aria-label="Next Employee"
+                className="p-2 rounded-lg text-slate-200 hover:bg-white/15 hover:text-white transition cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Selector Controls Strip */}
+        <div className="p-4 sm:p-5 bg-slate-50/60 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+          <div className="md:col-span-5">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Select Employee *
+            </label>
             <select
               value={currentEmployee.id}
               onChange={(e) => setSelectedId(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
+              className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
             >
               {employees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
@@ -323,72 +383,80 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               ))}
             </select>
           </div>
-        </div>
 
-        {/* Month Selector */}
-        <div className="md:col-span-4">
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Payroll Month *
-          </label>
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
-          >
-            <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-            <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-            <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-            <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-            <option value="August 2026">August 2026 (අගෝස්තු)</option>
-          </select>
-        </div>
+          <div className="md:col-span-4">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Payroll Month *
+            </label>
+            <select
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
+            >
+              <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
+              <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
+              <option value="November 2026">November 2026 (නොවැම්බර්)</option>
+              <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
+              <option value="August 2026">August 2026 (අගෝස්තු)</option>
+            </select>
+          </div>
 
-        {/* Basic Salary Reference */}
-        <div className="md:col-span-3">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">
-            Basic Salary (Reference)
-          </label>
-          <div className="px-3.5 py-2.5 bg-slate-100 rounded-lg border border-slate-200 font-bold text-slate-800 text-sm">
-            LKR {currentEmployee.basicSalary.toLocaleString()}
+          <div className="md:col-span-3">
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">
+              Basic Salary Reference
+            </label>
+            <div className="px-3.5 py-2.5 bg-white rounded-xl border border-slate-200 font-mono font-extrabold text-slate-900 text-sm flex items-center justify-between">
+              <span className="text-[11px] font-sans font-semibold text-slate-400">LKR</span>
+              <span>{currentEmployee.basicSalary.toLocaleString()}</span>
+            </div>
           </div>
         </div>
       </div>
 
       {isAllowanceLocked && (
-        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-xs">
-          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-3 shadow-xs">
+          <Lock className="w-5 h-5 text-rose-600 shrink-0" />
           <span>
-            Unpaid Leave / Absent exceeds 6 Days (48 Hours): Allowances &amp; Special Incentives are automatically locked (LKR 0.00). Basic salary, OT, and EPF/ETF deductions are calculated normally.
+            Unpaid Leave / Absent exceeds 6 Days (48 Hours): Allowances &amp; Special Incentives are
+            automatically locked (LKR 0.00). Basic salary, OT, and EPF/ETF deductions are calculated
+            normally.
           </span>
         </div>
       )}
 
       {hasExcessDeductions && (
-        <div className="p-3.5 rounded-xl bg-amber-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-xs">
+        <div className="p-4 rounded-2xl bg-amber-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-3 shadow-xs">
           <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
           <span>
-            Warning: Total Deductions (LKR {calculation?.totalDeductions.toLocaleString()}) exceed Gross Earnings (LKR {calculation?.gross.toLocaleString()}). Reduce Salary Advance or absence/late hours to save this record.
+            Warning: Total Deductions (LKR {calculation?.totalDeductions.toLocaleString()}) exceed
+            Gross Earnings (LKR {calculation?.gross.toLocaleString()}). Reduce Salary Advance or
+            absence/late hours to save this record.
           </span>
         </div>
       )}
 
-      {/* 4 Cards Grid (Exact replica of Image 3) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 4 Elevated Bento Calculator Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Card 1: OVERTIME & HOURS */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between border-t-4 border-t-blue-500">
           <div>
-            <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-100">
-              <Clock className="w-4 h-4 text-blue-600" />
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Overtime & Hours
+            <div className="flex items-center gap-2 pb-3 mb-3.5 border-b border-slate-100">
+              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                <Clock className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                Overtime &amp; Hours
               </h3>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  OT Hours (1.5x Rate)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">OT Hours (1.5x)</label>
+                  <span className="text-[11px] font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md">
+                    = LKR {calculation?.otAmt.toLocaleString() || '0'}
+                  </span>
+                </div>
                 <input
                   type="number"
                   min={0}
@@ -396,17 +464,45 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   step={0.25}
                   value={otHours}
                   onChange={(e) => setOtHours(clampNumber(e.target.value, 0, 300))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
-                <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  Rate: LKR {calculation?.otRate || 0}/hr (Max 300 hrs)
-                </span>
+                <div className="flex items-center justify-between mt-1.5 gap-1">
+                  <span className="text-[10px] text-slate-400">
+                    LKR {calculation?.otRate || 0}/hr
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setOtHours((v) => clampNumber(String(v + 1), 0, 300))}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                    >
+                      +1h
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOtHours((v) => clampNumber(String(v + 5), 0, 300))}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                    >
+                      +5h
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOtHours(0)}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 cursor-pointer"
+                    >
+                      0
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  SOT Hours (2.0x Rate)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">SOT Hours (2.0x)</label>
+                  <span className="text-[11px] font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md">
+                    = LKR {calculation?.sotAmt.toLocaleString() || '0'}
+                  </span>
+                </div>
                 <input
                   type="number"
                   min={0}
@@ -414,45 +510,75 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   step={0.25}
                   value={sotHours}
                   onChange={(e) => setSotHours(clampNumber(e.target.value, 0, 150))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
-                <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  Rate: LKR {calculation?.sotRate || 0}/hr (Max 150 hrs)
-                </span>
+                <div className="flex items-center justify-between mt-1.5 gap-1">
+                  <span className="text-[10px] text-slate-400">
+                    LKR {calculation?.sotRate || 0}/hr
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSotHours((v) => clampNumber(String(v + 1), 0, 150))}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                    >
+                      +1h
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSotHours((v) => clampNumber(String(v + 4), 0, 150))}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-slate-700 cursor-pointer"
+                    >
+                      +4h
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSotHours(0)}
+                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-rose-100 text-slate-500 cursor-pointer"
+                    >
+                      0
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-blue-50/50 p-2.5 rounded-lg">
-            <span className="text-[11px] font-semibold text-blue-700 block uppercase">
-              Total Overtime & Hours
-            </span>
-            <span className="text-base font-black text-blue-900">
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-blue-50/70 p-3 rounded-xl flex items-center justify-between">
+            <span className="text-[11px] font-bold text-blue-800 uppercase">Total Overtime</span>
+            <span className="text-base font-mono font-black text-blue-950">
               LKR {calculation?.totalOt.toLocaleString() || '0.00'}
             </span>
           </div>
         </div>
 
         {/* Card 2: ALLOWANCES */}
-        <div className={`bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between transition ${isAllowanceLocked ? 'opacity-60 bg-slate-50' : ''}`}>
+        <div
+          className={`bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between border-t-4 border-t-amber-500 transition ${
+            isAllowanceLocked ? 'opacity-65 bg-slate-50' : ''
+          }`}
+        >
           <div>
-            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-amber-600" />
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+                <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
                   Allowances
                 </h3>
               </div>
               {isAllowanceLocked && (
-                <span className="px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-700 text-[10px] font-bold">
-                  LOCKED (&gt; 6 Days / 48h)
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-bold">
+                  <Lock className="w-3 h-3" />
+                  LOCKED
                 </span>
               )}
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Attendant Allowance (Fixed 5,000)
                 </label>
                 <input
@@ -463,22 +589,22 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : attAllow}
                   onChange={(e) => setAttAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
-              <div className="p-2.5 rounded-lg bg-amber-50/40 border border-amber-200/80 space-y-2">
+              <div className="p-2.5 rounded-xl bg-amber-50/50 border border-amber-200/90 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-700">
+                  <label className="block text-xs font-bold text-slate-800">
                     Night Allowance (LKR)
                   </label>
-                  <span className="text-xs font-bold text-amber-800">
+                  <span className="text-xs font-mono font-extrabold text-amber-900">
                     = LKR {(isAllowanceLocked ? 0 : nightAllow).toLocaleString()}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                    <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
                       Night Days (දින ගණන)
                     </label>
                     <input
@@ -493,11 +619,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                         setNightDays(days);
                         setNightAllow(Math.min(200000, Number((days * nightRate).toFixed(2))));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                    <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
                       Per Night (එකකට LKR)
                     </label>
                     <input
@@ -512,14 +638,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                         setNightRate(rate);
                         setNightAllow(Math.min(200000, Number((nightDays * rate).toFixed(2))));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Grade Allowance (Excl. Training)
                 </label>
                 <input
@@ -530,12 +656,12 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : gradeAllow}
                   onChange={(e) => setGradeAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Transport Allowance (LKR)
                 </label>
                 <input
@@ -546,42 +672,47 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : transAllow}
                   onChange={(e) => setTransAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-amber-50/50 p-2.5 rounded-lg">
-            <span className="text-[11px] font-semibold text-amber-700 block uppercase">
-              Total Allowances
-            </span>
-            <span className="text-base font-black text-amber-900">
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-amber-50/70 p-3 rounded-xl flex items-center justify-between">
+            <span className="text-[11px] font-bold text-amber-800 uppercase">Total Allowances</span>
+            <span className="text-base font-mono font-black text-amber-950">
               LKR {calculation?.totalAllowances.toLocaleString() || '0.00'}
             </span>
           </div>
         </div>
 
         {/* Card 3: SPECIAL INCENTIVES */}
-        <div className={`bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between transition ${isAllowanceLocked ? 'opacity-60 bg-slate-50' : ''}`}>
+        <div
+          className={`bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between border-t-4 border-t-emerald-500 transition ${
+            isAllowanceLocked ? 'opacity-65 bg-slate-50' : ''
+          }`}
+        >
           <div>
-            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <Gift className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Gift className="w-4 h-4" />
+                </div>
+                <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
                   Special Incentives
                 </h3>
               </div>
               {isAllowanceLocked && (
-                <span className="px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-700 text-[10px] font-bold">
-                  LOCKED (&gt; 6 Days / 48h)
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-bold">
+                  <Lock className="w-3 h-3" />
+                  LOCKED
                 </span>
               )}
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Production Allowance / Incentive
                 </label>
                 <input
@@ -592,15 +723,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : prodAllow}
                   onChange={(e) => setProdAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
-                <span className="text-[11px] text-slate-400 mt-0.5 block">
-                  e.g. 20,000 for high efficiency
-                </span>
+                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                  {[0, 5000, 10000, 20000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      disabled={isAllowanceLocked}
+                      onClick={() => setProdAllow(preset)}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 hover:bg-emerald-100 text-slate-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      {preset === 0 ? '0' : `${preset / 1000}k`}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Checking Allowance (Trimmer/Checker)
                 </label>
                 <input
@@ -611,49 +752,67 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   disabled={isAllowanceLocked}
                   value={isAllowanceLocked ? 0 : checkingAllow}
                   onChange={(e) => setCheckingAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
+                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                  {[0, 2500, 5000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      disabled={isAllowanceLocked}
+                      onClick={() => setCheckingAllow(preset)}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 hover:bg-emerald-100 text-slate-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      {preset === 0 ? '0' : preset.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-emerald-50/50 p-2.5 rounded-lg">
-            <span className="text-[11px] font-semibold text-emerald-700 block uppercase">
-              Total Special Incentives
-            </span>
-            <span className="text-base font-black text-emerald-900">
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-emerald-50/70 p-3 rounded-xl flex items-center justify-between">
+            <span className="text-[11px] font-bold text-emerald-800 uppercase">Total Incentives</span>
+            <span className="text-base font-mono font-black text-emerald-950">
               LKR {calculation?.totalSpecialIncentives.toLocaleString() || '0.00'}
             </span>
           </div>
         </div>
 
-        {/* Card 4: DEDUCTIONS */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between">
+        {/* Card 4: DEDUCTIONS & ATTENDANCE */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between border-t-4 border-t-rose-500">
           <div>
-            <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-100">
-              <MinusCircle className="w-4 h-4 text-rose-600" />
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+            <div className="flex items-center gap-2 pb-3 mb-3.5 border-b border-slate-100">
+              <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                <MinusCircle className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
                 Deductions
               </h3>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  EPF 8% Deduction (LKR)
-                </label>
-                <div className="px-3 py-2 bg-rose-50/40 border border-rose-200 rounded-lg text-sm font-bold text-rose-900">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">EPF 8% Statutory</label>
+                  <span className="text-[10px] text-slate-400">8% of Basic</span>
+                </div>
+                <div className="px-3 py-2 bg-rose-50/60 border border-rose-200 rounded-xl text-sm font-mono font-extrabold text-rose-900">
                   LKR {calculation?.epf8.toLocaleString() || '0.00'}
                 </div>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  Statutory 8% of Basic Salary
-                </span>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Late & Early Out (Hours)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Late &amp; Early Out (Hrs)
+                  </label>
+                  {calculation && calculation.lateDeduction > 0 && (
+                    <span className="text-[11px] font-mono font-bold text-rose-600">
+                      -LKR {calculation.lateDeduction.toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
                   min={0}
@@ -661,22 +820,22 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   step={0.5}
                   value={lateHours}
                   onChange={(e) => setLateHours(clampNumber(e.target.value, 0, 200))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                  className="w-full px-3 py-2 text-sm font-mono font-semibold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500"
                 />
-                {calculation && calculation.lateDeduction > 0 && (
-                  <span className="text-[11px] text-rose-600 mt-0.5 block">
-                    -LKR {calculation.lateDeduction.toLocaleString()}
-                  </span>
-                )}
               </div>
 
-              <div className="p-2.5 rounded-lg bg-rose-50/40 border border-rose-200/80 space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700">
-                  Unpaid Leave / Absents
-                </label>
+              <div className="p-2.5 rounded-xl bg-rose-50/50 border border-rose-200/90 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">Unpaid Leave / Absents</label>
+                  {calculation && calculation.unpaidDeduction > 0 && (
+                    <span className="text-[11px] font-mono font-bold text-rose-600">
+                      -LKR {calculation.unpaidDeduction.toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                    <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
                       Days (දින)
                     </label>
                     <input
@@ -686,11 +845,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                       step={0.5}
                       value={unpaidDays}
                       onChange={(e) => setUnpaidDays(clampNumber(e.target.value, 0, 25))}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                    <label className="block text-[10px] font-medium text-slate-600 mb-0.5">
                       Hours (පැය)
                     </label>
                     <input
@@ -703,22 +862,33 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                         const hrs = clampNumber(e.target.value, 0, 200);
                         setUnpaidDays(Math.min(25, Number((hrs / 8).toFixed(2))));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
                     />
                   </div>
                 </div>
-                <span className="text-[10px] text-slate-500 block">
-                  Max 6 Days (48 Hours) before Allowances/Incentives lock (limit 25 days)
-                </span>
-                {calculation && calculation.unpaidDeduction > 0 && (
-                  <span className="text-[11px] font-semibold text-rose-600 block">
-                    -LKR {calculation.unpaidDeduction.toLocaleString()}
+
+                {/* 6-Day (48h) Lock Threshold Meter */}
+                <div className="space-y-1">
+                  <div className="h-1.5 w-full rounded-full bg-rose-100 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        isAllowanceLocked
+                          ? 'bg-rose-600'
+                          : unpaidDays >= 4
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${unpaidThresholdPct}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    6 Days (48h) limit before Allowances lock (max 25d)
                   </span>
-                )}
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Salary Advance (LKR)
                 </label>
                 <input
@@ -728,9 +898,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   step={500}
                   value={advance}
                   onChange={(e) => setAdvance(clampNumber(e.target.value, 0, 300000))}
-                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-hidden focus:ring-2 ${
+                  className={`w-full px-3 py-2 text-sm font-mono font-semibold border rounded-xl focus:outline-hidden focus:ring-2 ${
                     hasExcessDeductions
-                      ? 'border-rose-500 focus:ring-rose-500 bg-rose-50/30'
+                      ? 'border-rose-500 focus:ring-rose-500 bg-rose-50/40'
                       : 'border-slate-300 focus:ring-rose-500'
                   }`}
                 />
@@ -738,57 +908,69 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 bg-rose-50/50 p-2.5 rounded-lg">
-            <span className="text-[11px] font-semibold text-rose-700 block uppercase">
-              Total Deductions
-            </span>
-            <span className="text-base font-black text-rose-900">
+          <div className="mt-4 pt-3 border-t border-slate-100 bg-rose-50/70 p-3 rounded-xl flex items-center justify-between">
+            <span className="text-[11px] font-bold text-rose-800 uppercase">Total Deductions</span>
+            <span className="text-base font-mono font-black text-rose-950">
               LKR {calculation?.totalDeductions.toLocaleString() || '0.00'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Summary Calculation Footer & Actions */}
-      <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+      {/* Financial Command Summary Footer */}
+      <div className="bg-slate-950 text-white p-5 sm:p-6 rounded-2xl shadow-xl border border-slate-800 flex flex-wrap items-center justify-between gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-5 flex-1 min-w-[280px]">
           <div>
-            <span className="text-xs text-slate-400 block uppercase font-medium">Basic Salary</span>
-            <span className="text-lg font-bold text-slate-100">
+            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+              Basic Salary
+            </span>
+            <span className="text-base sm:text-lg font-mono font-bold text-slate-100 mt-0.5 block">
               LKR {calculation?.basic.toLocaleString() || '0.00'}
             </span>
           </div>
           <div>
-            <span className="text-xs text-slate-400 block uppercase font-medium">Gross Earnings (දළ)</span>
-            <span className="text-lg font-bold text-amber-400">
+            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+              Additions
+            </span>
+            <span className="text-base sm:text-lg font-mono font-bold text-indigo-300 mt-0.5 block">
+              +LKR {totalAdditions.toLocaleString()}
+            </span>
+          </div>
+          <div>
+            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+              Gross Earnings (දළ)
+            </span>
+            <span className="text-base sm:text-lg font-mono font-bold text-amber-400 mt-0.5 block">
               LKR {calculation?.gross.toLocaleString() || '0.00'}
             </span>
           </div>
           <div>
-            <span className="text-xs text-slate-400 block uppercase font-medium">Total Deductions (අඩුකිරීම්)</span>
-            <span className="text-lg font-bold text-rose-400">
-              LKR {calculation?.totalDeductions.toLocaleString() || '0.00'}
+            <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider">
+              Deductions (අඩුකිරීම්)
+            </span>
+            <span className="text-base sm:text-lg font-mono font-bold text-rose-400 mt-0.5 block">
+              -LKR {calculation?.totalDeductions.toLocaleString() || '0.00'}
             </span>
           </div>
-          <div>
-            <span className="text-xs text-indigo-300 block uppercase font-semibold">Net Salary (ශුද්ධ වැටුප)</span>
-            <span className="text-2xl font-black text-emerald-400 tracking-tight">
+          <div className="col-span-2 sm:col-span-4 lg:col-span-1 bg-emerald-500/15 border border-emerald-400/30 rounded-xl px-3.5 py-2">
+            <span className="text-[10px] text-emerald-300 block uppercase font-bold tracking-wider">
+              Net Salary (ශුද්ධ වැටුප)
+            </span>
+            <span className="text-xl font-mono font-black text-emerald-400 tracking-tight">
               LKR {calculation?.net.toLocaleString() || '0.00'}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={loading}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition flex items-center gap-2 shadow-md disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save & Update Salary
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={loading}
+          className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm transition flex items-center gap-2 shadow-lg shadow-indigo-950/50 disabled:opacity-50 cursor-pointer shrink-0"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save &amp; Update Salary
+        </button>
       </div>
     </div>
   );

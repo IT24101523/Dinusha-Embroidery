@@ -126,83 +126,125 @@ export function EpfFormC({ employees }: EpfFormCProps) {
 
   return (
     <div className="space-y-6">
-      {/* Control & Navigation Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4 print:hidden">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-              EMPLOYEES’ PROVIDENT FUND (EPF) & FORM C
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-              {month}
-            </span>
+      {/* Control Studio & Statutory Summary Strip (Hidden on Print) */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-extrabold tracking-tight text-white">
+                EMPLOYEES&apos; PROVIDENT FUND (EPF) &amp; FORM C
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/30 text-indigo-100 border border-indigo-400/40">
+                {month}
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Official Form C (EPF Act No. 15 of 1958) &amp; Central Bank e-Return Excel generator
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            Official Form C (EPF Act No. 15 of 1958) & Central Bank e-Return Excel generator
-          </p>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* View Mode Toggle */}
+            <div className="flex items-center p-1 bg-white/10 rounded-xl border border-white/15 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setViewMode('formC')}
+                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'formC'
+                    ? 'bg-white text-indigo-950 shadow-xs font-bold'
+                    : 'text-slate-200 hover:text-white'
+                }`}
+              >
+                <FileCheck2 className="w-3.5 h-3.5" />
+                Official FORM C View
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('excelReturn')}
+                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'excelReturn'
+                    ? 'bg-white text-indigo-950 shadow-xs font-bold'
+                    : 'text-slate-200 hover:text-white'
+                }`}
+              >
+                <TableProperties className="w-3.5 h-3.5" />
+                EPF e-Return Table View
+              </button>
+            </div>
+
+            {/* Month Selector */}
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3.5 py-2 rounded-xl border border-white/15 text-xs font-semibold text-white">
+              <Calendar className="w-4 h-4 text-indigo-300" />
+              <span className="text-slate-300">Month:</span>
+              <select
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
+              >
+                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
+                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
+                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
+                <option value="July 2026" className="text-slate-900">July 2026 (ජූලි)</option>
+                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
+                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+              </select>
+            </div>
+
+            {/* Action Buttons */}
+            <button
+              type="button"
+              onClick={viewMode === 'formC' ? handleExportFormCExcel : handleExportEpfExcel}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              {viewMode === 'formC' ? 'Download Form C Excel' : 'Download e-Return Excel'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              Print Form C (A4)
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* View Mode Toggle */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-semibold">
-            <button
-              onClick={() => setViewMode('formC')}
-              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
-                viewMode === 'formC'
-                  ? 'bg-white text-indigo-700 shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileCheck2 className="w-3.5 h-3.5" />
-              Official FORM C View
-            </button>
-            <button
-              onClick={() => setViewMode('excelReturn')}
-              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
-                viewMode === 'excelReturn'
-                  ? 'bg-white text-indigo-700 shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <TableProperties className="w-3.5 h-3.5" />
-              EPF e-Return Table View
-            </button>
+        {/* 4 Summary Stat Tiles */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-slate-50/70">
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Total EPF Members
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              {epfRows.length} Staff
+            </span>
           </div>
-
-          {/* Month Selector */}
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <span>Month:</span>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="bg-transparent border-none text-slate-900 font-bold focus:outline-hidden"
-            >
-              <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-              <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-              <option value="August 2026">August 2026 (අගෝස්තු)</option>
-              <option value="July 2026">July 2026 (ජූලි)</option>
-              <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-              <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-            </select>
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Employer Share (12%)
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              LKR {formatLkr(totals.epf12)}
+            </span>
           </div>
-
-          {/* Action Buttons */}
-          <button
-            onClick={viewMode === 'formC' ? handleExportFormCExcel : handleExportEpfExcel}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            {viewMode === 'formC' ? 'Download Form C Excel' : 'Download e-Return Excel'}
-          </button>
-
-          <button
-            onClick={() => window.print()}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <Printer className="w-4 h-4 text-amber-400" />
-            Print Form C (A4)
-          </button>
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Employee Share (8%)
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              LKR {formatLkr(totals.epf8)}
+            </span>
+          </div>
+          <div className="bg-indigo-50/70 rounded-xl border border-indigo-200 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-800 block">
+              Total Remittance (20%)
+            </span>
+            <span className="text-lg font-mono font-black text-indigo-950">
+              LKR {formatLkr(totals.totalEpf20)}
+            </span>
+          </div>
         </div>
       </div>
 

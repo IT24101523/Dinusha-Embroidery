@@ -173,55 +173,93 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
 
   return (
     <div className="space-y-6">
-      {/* Control Bar (hidden during print) */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4 print:hidden">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-              MONTHLY MASTER SALARY SHEET (2026)
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-              {month}
-            </span>
+      {/* Control Bar & Summary Strip (hidden during print) */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-extrabold tracking-tight text-white">
+                MONTHLY MASTER SALARY SHEET (2026)
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/30 text-indigo-100 border border-indigo-400/40">
+                {month}
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Factory master wage ledger with employee signature columns &amp; allowance breakdown
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            Factory master wage sheet with employee signatures & allowance breakdown (Image 1 format)
-          </p>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3.5 py-2 rounded-xl border border-white/15 text-xs font-semibold text-white">
+              <Calendar className="w-4 h-4 text-indigo-300" />
+              <span className="text-slate-300">Month:</span>
+              <select
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
+              >
+                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
+                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
+                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
+                <option value="July 2026" className="text-slate-900">July 2026 (ජූලි)</option>
+                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
+                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Download Excel (.xlsx)
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition flex items-center gap-2 shadow-md cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              Print Sheet (Landscape)
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <span>Month:</span>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="bg-transparent border-none text-slate-900 font-bold focus:outline-hidden"
-            >
-              <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-              <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-              <option value="August 2026">August 2026 (අගෝස්තු)</option>
-              <option value="July 2026">July 2026 (ජූලි)</option>
-              <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-              <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-            </select>
+        {/* 4 Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-slate-50/70">
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Active Employees
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">{rows.length}</span>
           </div>
-
-          <button
-            onClick={handleExportExcel}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            Download Excel (.xlsx)
-          </button>
-
-          <button
-            onClick={handlePrint}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition flex items-center gap-2 shadow-xs"
-          >
-            <Printer className="w-4 h-4 text-amber-400" />
-            Print Sheet (Landscape)
-          </button>
+          <div className="bg-white rounded-xl border border-slate-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Total Basic + Bud
+            </span>
+            <span className="text-lg font-mono font-black text-slate-900">
+              LKR {formatLkr(totals.basic)}
+            </span>
+          </div>
+          <div className="bg-white rounded-xl border border-amber-200/80 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">
+              Total Gross Payroll
+            </span>
+            <span className="text-lg font-mono font-black text-amber-900">
+              LKR {formatLkr(totals.gross)}
+            </span>
+          </div>
+          <div className="bg-emerald-50/70 rounded-xl border border-emerald-200 p-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">
+              Total Net Payroll
+            </span>
+            <span className="text-lg font-mono font-black text-emerald-900">
+              LKR {formatLkr(totals.net)}
+            </span>
+          </div>
         </div>
       </div>
 

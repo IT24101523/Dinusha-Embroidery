@@ -92,6 +92,10 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
     return pairs;
   }, [payslipsToPrint]);
 
+  const totalBatchNet = useMemo(() => {
+    return payslipsToPrint.reduce((sum, p) => sum + (p.net || 0), 0);
+  }, [payslipsToPrint]);
+
   // Toggle selection
   const handleToggleSelectAll = () => {
     if (selectedIds.length === employees.length) {
@@ -126,59 +130,83 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
 
   return (
     <div className="space-y-6">
-      {/* Print Control & Management Panel (Hidden during Print) */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4 print:hidden">
-        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-                PAYSLIP PRINT MANAGEMENT
+      {/* Print Control & Management Studio (Hidden during Print) */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden print:hidden">
+        {/* Dark Studio Command Header */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-extrabold tracking-tight text-white">
+                PAYSLIP PRINT STUDIO
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-400/20 text-amber-200 border border-amber-400/30 flex items-center gap-1">
                 <Scissors className="w-3 h-3" />
                 2 Payslips Per A4 Sheet
               </span>
             </div>
-            <p className="text-xs text-slate-500">
-              Select multiple employees to batch print. Prints exactly 2 official payslips on each A4 paper with a center cutting line.
+            <p className="text-xs text-slate-300">
+              Select staff below to batch print 2 official bilingual payslips per A4 page with center cut guide.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
-              <Calendar className="w-4 h-4 text-slate-500" />
-              <span>Month:</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3.5 py-2 rounded-xl border border-white/15 text-xs font-semibold text-white">
+              <Calendar className="w-4 h-4 text-indigo-300" />
+              <span className="text-slate-300">Month:</span>
               <select
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
-                className="bg-transparent border-none text-slate-900 font-bold focus:outline-hidden"
+                className="bg-transparent border-none text-white font-bold focus:outline-hidden cursor-pointer"
               >
-                <option value="October 2026">October 2026 (ඔක්තෝබර්)</option>
-                <option value="September 2026">September 2026 (සැප්තැම්බර්)</option>
-                <option value="November 2026">November 2026 (නොවැම්බර්)</option>
-                <option value="December 2026">December 2026 (දෙසැම්බර්)</option>
-                <option value="August 2026">August 2026 (අගෝස්තු)</option>
+                <option value="October 2026" className="text-slate-900">October 2026 (ඔක්තෝබර්)</option>
+                <option value="September 2026" className="text-slate-900">September 2026 (සැප්තැම්බර්)</option>
+                <option value="November 2026" className="text-slate-900">November 2026 (නොවැම්බර්)</option>
+                <option value="December 2026" className="text-slate-900">December 2026 (දෙසැම්බර්)</option>
+                <option value="August 2026" className="text-slate-900">August 2026 (අගෝස්තු)</option>
               </select>
             </div>
 
             <button
+              type="button"
               onClick={handlePrint}
               disabled={payslipsToPrint.length === 0}
-              className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-md disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs sm:text-sm transition flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
             >
-              <Printer className="w-4 h-4 text-amber-400" />
+              <Printer className="w-4 h-4" />
               Print Batch ({pairedSheets.length} A4 Pages)
             </button>
           </div>
         </div>
 
-        {/* Employee Selection Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-3">
+        {/* Summary Stat Badges */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-5 pt-4">
+          <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-500">Selected Staff</span>
+            <span className="text-sm font-mono font-extrabold text-indigo-700">
+              {selectedIds.length} / {employees.length}
+            </span>
+          </div>
+          <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-500">A4 Sheets (2-Up)</span>
+            <span className="text-sm font-mono font-extrabold text-amber-700">
+              {pairedSheets.length} Sheets
+            </span>
+          </div>
+          <div className="px-3.5 py-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200/80 flex items-center justify-between">
+            <span className="text-xs font-semibold text-emerald-800">Total Batch Net Pay</span>
+            <span className="text-sm font-mono font-black text-emerald-900">
+              LKR {formatLkr(totalBatchNet)}
+            </span>
+          </div>
+        </div>
+
+        {/* Employee Selection Toolbar & Grid */}
+        <div className="p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
               onClick={handleToggleSelectAll}
-              className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 transition"
+              className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer"
             >
               {selectedIds.length === employees.length ? (
                 <CheckSquare className="w-4 h-4 text-indigo-600" />
@@ -188,52 +216,73 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
               {selectedIds.length === employees.length ? 'Deselect All' : 'Select All Employees'}
             </button>
 
-            <span className="text-xs text-slate-600 font-medium">
-              Selected: <strong className="text-indigo-600">{selectedIds.length}</strong> of{' '}
-              {employees.length} employees (will print on{' '}
-              <strong className="text-amber-700">{pairedSheets.length}</strong> A4 sheets)
-            </span>
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <input
+                type="search"
+                placeholder="Search by EPF or Name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs font-medium border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-slate-50/70 focus:bg-white"
+              />
+            </div>
           </div>
 
-          <div className="relative w-64">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by EPF or Name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 max-h-56 overflow-y-auto p-2 border border-slate-200/80 rounded-2xl bg-slate-50/70 scrollbar-thin">
+            {filteredEmployees.map((emp) => {
+              const isSelected = selectedIds.includes(emp.id);
+              const isSaved = Boolean(savedRecords[emp.id]);
+
+              return (
+                <label
+                  key={emp.id}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                    isSelected
+                      ? 'bg-indigo-50/90 border-indigo-300 text-indigo-950 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/80'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => handleToggleEmployee(emp.id)}
+                    className="w-3.5 h-3.5 text-indigo-600 rounded-xs focus:ring-indigo-500 shrink-0"
+                  />
+                  {emp.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={emp.photoUrl}
+                      alt={emp.fullName}
+                      className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                      {(emp.initials || emp.fullName || '?').slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono font-bold text-[11px] truncate">
+                        #{emp.epfNo}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded-sm text-[9px] font-bold uppercase ${
+                          isSaved
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {isSaved ? 'Saved' : 'Default'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 truncate font-medium">
+                      {emp.fullName}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
           </div>
-        </div>
-
-        {/* Selection Pills / Checkbox Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-2 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-lg bg-slate-50/50">
-          {filteredEmployees.map((emp) => {
-            const isSelected = selectedIds.includes(emp.id);
-
-            return (
-              <label
-                key={emp.id}
-                className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition select-none ${
-                  isSelected
-                    ? 'bg-indigo-50 border-indigo-200 text-indigo-950 font-medium'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => handleToggleEmployee(emp.id)}
-                  className="w-3.5 h-3.5 text-indigo-600 rounded-xs focus:ring-indigo-500"
-                />
-                <div className="truncate">
-                  <div className="font-bold truncate">EPF {emp.epfNo}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{emp.fullName}</div>
-                </div>
-              </label>
-            );
-          })}
         </div>
       </div>
 
@@ -303,7 +352,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
             return (
               <div
                 key={`sheet-${sheetIndex}`}
-                className="a4-sheet-container bg-white rounded-xl border border-slate-300 shadow-sm max-w-4xl mx-auto p-4 sm:p-6 mb-8 relative"
+                className="a4-sheet-container bg-white rounded-2xl border border-slate-300/90 shadow-lg ring-1 ring-slate-200/60 max-w-4xl mx-auto p-4 sm:p-6 mb-8 relative"
               >
                 {/* On-Screen Sheet Badge */}
                 <div className="print:hidden flex justify-between items-center text-[11px] font-bold text-slate-400 pb-2 mb-3 border-b border-slate-200">
