@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { supabaseAdmin, formatSupabaseError } from '@/lib/supabase/admin';
 import { EmployeeEntity } from '../domain/entities';
 import { EmployeeFormData } from '../domain/validation';
 
@@ -74,7 +74,7 @@ export class EmployeeRepository {
 
     if (error) {
       console.error('[EmployeeRepository] createEmployee error:', error);
-      throw new Error(error.message);
+      throw new Error(formatSupabaseError(error));
     }
 
     return this.mapToEntity(data);
@@ -119,7 +119,7 @@ export class EmployeeRepository {
 
     if (error) {
       console.error('[EmployeeRepository] updateEmployee error:', error);
-      throw new Error(error.message);
+      throw new Error(formatSupabaseError(error));
     }
 
     return this.mapToEntity(data);
