@@ -117,6 +117,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     };
   }, [currentEmployee, month]);
 
+  const isAllowanceLocked = unpaidDays > 6;
+  const unpaidHours = Number((unpaidDays * 8).toFixed(2));
+
   // Real-time calculation using pure domain engine
   const calculation: PayrollCalculationBreakdown | null = useMemo(() => {
     if (!currentEmployee) return null;
@@ -308,6 +311,15 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         </div>
       </div>
 
+      {isAllowanceLocked && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-xs">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+          <span>
+            Unpaid Leave / Absent exceeds 6 Days (48 Hours): Allowances &amp; Special Incentives are automatically locked (LKR 0.00). Basic salary, OT, and EPF/ETF deductions are calculated normally.
+          </span>
+        </div>
+      )}
+
       {/* 4 Cards Grid (Exact replica of Image 3) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: OVERTIME & HOURS */}
@@ -368,13 +380,20 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         </div>
 
         {/* Card 2: ALLOWANCES */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between">
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between transition ${isAllowanceLocked ? 'opacity-60 bg-slate-50' : ''}`}>
           <div>
-            <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-100">
-              <DollarSign className="w-4 h-4 text-amber-600" />
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Allowances
-              </h3>
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Allowances
+                </h3>
+              </div>
+              {isAllowanceLocked && (
+                <span className="px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-700 text-[10px] font-bold">
+                  LOCKED (&gt; 6 Days / 48h)
+                </span>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -386,9 +405,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   type="number"
                   min={0}
                   step={500}
-                  value={attAllow}
+                  disabled={isAllowanceLocked}
+                  value={isAllowanceLocked ? 0 : attAllow}
                   onChange={(e) => setAttAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -398,7 +418,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     Night Allowance (LKR)
                   </label>
                   <span className="text-xs font-bold text-amber-800">
-                    = LKR {nightAllow.toLocaleString()}
+                    = LKR {(isAllowanceLocked ? 0 : nightAllow).toLocaleString()}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -410,13 +430,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                       type="number"
                       min={0}
                       step={1}
-                      value={nightDays}
+                      disabled={isAllowanceLocked}
+                      value={isAllowanceLocked ? 0 : nightDays}
                       onChange={(e) => {
                         const days = Math.max(0, Number(e.target.value) || 0);
                         setNightDays(days);
                         setNightAllow(Number((days * nightRate).toFixed(2)));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div>
@@ -427,13 +448,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                       type="number"
                       min={0}
                       step={50}
-                      value={nightRate}
+                      disabled={isAllowanceLocked}
+                      value={isAllowanceLocked ? 0 : nightRate}
                       onChange={(e) => {
                         const rate = Math.max(0, Number(e.target.value) || 0);
                         setNightRate(rate);
                         setNightAllow(Number((nightDays * rate).toFixed(2)));
                       }}
-                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -447,9 +469,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   type="number"
                   min={0}
                   step={500}
-                  value={gradeAllow}
+                  disabled={isAllowanceLocked}
+                  value={isAllowanceLocked ? 0 : gradeAllow}
                   onChange={(e) => setGradeAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -461,9 +484,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   type="number"
                   min={0}
                   step={250}
-                  value={transAllow}
+                  disabled={isAllowanceLocked}
+                  value={isAllowanceLocked ? 0 : transAllow}
                   onChange={(e) => setTransAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -480,13 +504,20 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         </div>
 
         {/* Card 3: SPECIAL INCENTIVES */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between">
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between transition ${isAllowanceLocked ? 'opacity-60 bg-slate-50' : ''}`}>
           <div>
-            <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-100">
-              <Gift className="w-4 h-4 text-emerald-600" />
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Special Incentives
-              </h3>
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Gift className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Special Incentives
+                </h3>
+              </div>
+              {isAllowanceLocked && (
+                <span className="px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-700 text-[10px] font-bold">
+                  LOCKED (&gt; 6 Days / 48h)
+                </span>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -498,9 +529,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   type="number"
                   min={0}
                   step={500}
-                  value={prodAllow}
+                  disabled={isAllowanceLocked}
+                  value={isAllowanceLocked ? 0 : prodAllow}
                   onChange={(e) => setProdAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
                 <span className="text-[11px] text-slate-400 mt-0.5 block">
                   e.g. 20,000 for high efficiency
@@ -515,9 +547,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   type="number"
                   min={0}
                   step={250}
-                  value={checkingAllow}
+                  disabled={isAllowanceLocked}
+                  value={isAllowanceLocked ? 0 : checkingAllow}
                   onChange={(e) => setCheckingAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -575,20 +608,43 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Unpaid Leave / Absents (Days)
+              <div className="p-2.5 rounded-lg bg-rose-50/40 border border-rose-200/80 space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Unpaid Leave / Absents
                 </label>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={unpaidDays}
-                  onChange={(e) => setUnpaidDays(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                      Days (දින)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={unpaidDays}
+                      onChange={(e) => setUnpaidDays(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                      Hours (පැය)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={unpaidHours}
+                      onChange={(e) => setUnpaidDays(Math.max(0, Number(((Number(e.target.value) || 0) / 8).toFixed(2))))}
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                    />
+                  </div>
+                </div>
+                <span className="text-[10px] text-slate-500 block">
+                  Max 6 Days (48 Hours) before Allowances/Incentives lock
+                </span>
                 {calculation && calculation.unpaidDeduction > 0 && (
-                  <span className="text-[11px] text-rose-600 mt-0.5 block">
+                  <span className="text-[11px] font-semibold text-rose-600 block">
                     -LKR {calculation.unpaidDeduction.toLocaleString()}
                   </span>
                 )}

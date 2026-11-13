@@ -16,16 +16,22 @@ export function calculateSalaryForEmployee(
   const hourlyRate = basic > 0 ? basic / STANDARD_MONTH_HOURS : 0;
   const dailyRate = basic > 0 ? basic / STANDARD_MONTH_DAYS : 0;
 
+  const unpaidDays = Math.max(0, Number(input.unpaidDays) || 0);
+  const unpaidDeduction = Number((unpaidDays * dailyRate).toFixed(2));
+
+  // If employee has > 6 unpaid/absent days (> 48 hours), lock Allowances and Special Incentives
+  const isAllowanceLocked = unpaidDays > 6;
+
   // Allowances
-  const attAllow = Math.max(0, Number(input.attAllow) || 0);
-  const nightAllow = Math.max(0, Number(input.nightAllow) || 0);
-  const gradeAllow = Math.max(0, Number(input.gradeAllow) || 0);
-  const transAllow = Math.max(0, Number(input.transAllow) || 0);
+  const attAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.attAllow) || 0);
+  const nightAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.nightAllow) || 0);
+  const gradeAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.gradeAllow) || 0);
+  const transAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.transAllow) || 0);
   const totalAllowances = Number((attAllow + nightAllow + gradeAllow + transAllow).toFixed(2));
 
   // Special Incentives
-  const prodAllow = Math.max(0, Number(input.prodAllow) || 0);
-  const checkingAllow = Math.max(0, Number(input.checkingAllow) || 0);
+  const prodAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.prodAllow) || 0);
+  const checkingAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.checkingAllow) || 0);
   const totalSpecialIncentives = Number((prodAllow + checkingAllow).toFixed(2));
 
   // Overtime
@@ -47,18 +53,16 @@ export function calculateSalaryForEmployee(
   // Gross Salary
   const gross = Number((basic + totalAllowances + totalSpecialIncentives + totalOt).toFixed(2));
 
-  // Statutory Employer Contributions
-  const epf12 = Number((basic * EPF_EMPLOYER_RATE).toFixed(2));
-  const etf3 = Number((basic * ETF_EMPLOYER_RATE).toFixed(2));
+  // Statutory Employer & Employee Contributions calculated on earned basic (basic minus unpaid deduction)
+  const epfLiableBasic = Math.max(0, Number((basic - unpaidDeduction).toFixed(2)));
+  const epf12 = Number((epfLiableBasic * EPF_EMPLOYER_RATE).toFixed(2));
+  const etf3 = Number((epfLiableBasic * ETF_EMPLOYER_RATE).toFixed(2));
 
   // Deductions
-  const epf8 = Number((basic * EPF_EMPLOYEE_RATE).toFixed(2));
+  const epf8 = Number((epfLiableBasic * EPF_EMPLOYEE_RATE).toFixed(2));
 
   const lateHours = Math.max(0, Number(input.lateHours) || 0);
   const lateDeduction = Number((lateHours * hourlyRate).toFixed(2));
-
-  const unpaidDays = Math.max(0, Number(input.unpaidDays) || 0);
-  const unpaidDeduction = Number((unpaidDays * dailyRate).toFixed(2));
 
   const advance = Math.max(0, Number(input.advance) || 0);
 
