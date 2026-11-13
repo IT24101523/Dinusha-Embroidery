@@ -238,36 +238,54 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
       </div>
 
       {/* Printable Output Container */}
-      <div className="space-y-8">
-        <style jsx global>{`
-          @page {
-            size: A4 portrait;
-            margin: 6mm 8mm 6mm 8mm;
-          }
-          @media print {
-            body {
-              background: white !important;
-              color: black !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            .print\\:hidden {
-              display: none !important;
-            }
-            .a4-sheet-container {
-              page-break-after: always;
-              break-after: page;
-              height: 284mm;
-              display: flex;
-              flex-direction: column;
-              justify-content: space-between;
-              padding: 0;
-              margin: 0;
-              border: none !important;
-              box-shadow: none !important;
-            }
-          }
-        `}</style>
+      <div className="space-y-8 print:space-y-0">
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              @page {
+                size: A4 portrait;
+                margin: 5mm 7mm 5mm 7mm;
+              }
+              @media print {
+                html, body {
+                  background: white !important;
+                  color: black !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  height: auto !important;
+                  overflow: visible !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .print\\:hidden {
+                  display: none !important;
+                }
+                .a4-sheet-container {
+                  display: block !important;
+                  width: 100% !important;
+                  max-width: 100% !important;
+                  height: auto !important;
+                  padding: 0 !important;
+                  margin: 0 !important;
+                  border: none !important;
+                  box-shadow: none !important;
+                  break-inside: avoid !important;
+                  page-break-inside: avoid !important;
+                  break-after: page !important;
+                  page-break-after: always !important;
+                }
+                .a4-sheet-container:last-child {
+                  break-after: auto !important;
+                  page-break-after: auto !important;
+                }
+                .payslip-half-block {
+                  break-inside: avoid !important;
+                  page-break-inside: avoid !important;
+                }
+              }
+            `,
+          }}
+        />
 
         {pairedSheets.length === 0 ? (
           <div className="bg-white p-12 rounded-xl border border-slate-200 text-center max-w-md mx-auto print:hidden">
@@ -314,7 +332,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
                   {bottomSlip ? (
                     <PayslipSingleItem record={bottomSlip} formatLkr={formatLkr} />
                   ) : (
-                    <div className="h-64 border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-64 border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-xs text-slate-400 print:hidden">
                       Empty second slot on this A4 page
                     </div>
                   )}
@@ -585,7 +603,7 @@ function PayslipSingleItem({
             </div>
           </div>
 
-          <div className="mt-14 pt-1 border-t border-black flex justify-between items-center font-bold text-[11px]">
+          <div className="mt-6 pt-1 border-t border-black flex justify-between items-center font-bold text-[11px]">
             <span>මුළු අඩුකිරීම්</span>
             <span className="font-mono font-black">{formatLkr(record.totalDeductions)}</span>
           </div>

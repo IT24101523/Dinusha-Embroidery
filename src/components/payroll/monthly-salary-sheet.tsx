@@ -112,7 +112,7 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
   }, [rows]);
 
   const handleExportExcel = () => {
-    const excelData = rows.map((r) => ({
+    const excelData: Record<string, unknown>[] = rows.map((r) => ({
       NO: r.epfNo,
       Name: r.name,
       'Basic+Bud': r.basic,
@@ -134,25 +134,25 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
       Sign: '',
     }));
 
-    // Add TOTAL summary row
+    // Add TOTAL summary row (only Net Sal total as requested)
     excelData.push({
-      NO: 0,
+      NO: '',
       Name: 'TOTAL',
-      'Basic+Bud': totals.basic,
-      'Allowance (Production)': totals.prodAllow,
-      'Allowance (Grade)': totals.gradeAllow,
-      'Att All': totals.attAllow,
-      'Transport Allowance': totals.transAllow,
-      'Over Hour': totals.otHours,
-      Over: totals.otAmt,
-      'SP H': totals.sotHours,
-      'Sp O.T': totals.sotAmt,
-      'Gross sal': totals.gross,
-      'EPF 8%': totals.epf8,
-      'Late& Early(mm)': 0,
-      'Late & Early': totals.lateDeduction,
-      'No Pay Hours': 0,
-      'No Pay': totals.unpaidDeduction,
+      'Basic+Bud': '',
+      'Allowance (Production)': '',
+      'Allowance (Grade)': '',
+      'Att All': '',
+      'Transport Allowance': '',
+      'Over Hour': '',
+      Over: '',
+      'SP H': '',
+      'Sp O.T': '',
+      'Gross sal': '',
+      'EPF 8%': '',
+      'Late& Early(mm)': '',
+      'Late & Early': '',
+      'No Pay Hours': '',
+      'No Pay': '',
       'Net Sal': totals.net,
       Sign: '',
     });
@@ -375,32 +375,15 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
               </tr>
             ))}
 
-            {/* Bottom Total Summary Row */}
+            {/* Bottom Total Summary Row - Only Net Sal total shown */}
             <tr className="bg-slate-200 font-bold border-t-2 border-black text-black text-[9.5px]">
-              <td colSpan={2} className="border border-black py-1 px-1 text-center font-black truncate">
-                TOTAL ({rows.length})
+              <td colSpan={17} className="border border-black py-1.5 px-2 text-right font-black uppercase tracking-wider">
+                TOTAL NET SALARY ({rows.length} Employees)
               </td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.basic)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.prodAllow)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.gradeAllow)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.attAllow)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.transAllow)}</td>
-              <td className="border border-black py-1 px-0.5 text-center">{totals.otHours.toFixed(2)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.otAmt)}</td>
-              <td className="border border-black py-1 px-0.5 text-center">{totals.sotHours.toFixed(2)}</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.sotAmt)}</td>
-              <td className="border border-black py-1 px-0.5 text-right font-black text-amber-900 bg-amber-100/50">
-                {formatLkr(totals.gross)}
-              </td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.epf8)}</td>
-              <td className="border border-black py-1 px-0.5 text-center">-</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.lateDeduction)}</td>
-              <td className="border border-black py-1 px-0.5 text-center">-</td>
-              <td className="border border-black py-1 px-0.5 text-right">{formatLkr(totals.unpaidDeduction)}</td>
-              <td className="border border-black py-1 px-0.5 text-right font-black text-emerald-950 bg-emerald-100/60 text-[10.5px]">
+              <td className="border border-black py-1.5 px-0.5 text-right font-black text-emerald-950 bg-emerald-100/60 text-[10.5px]">
                 {formatLkr(totals.net)}
               </td>
-              <td className="border border-black py-1 px-1"></td>
+              <td className="border border-black py-1.5 px-1"></td>
             </tr>
           </tbody>
         </table>

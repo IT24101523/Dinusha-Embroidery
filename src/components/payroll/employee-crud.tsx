@@ -18,7 +18,7 @@ import {
 
 interface EmployeeCrudProps {
   initialEmployees: EmployeeEntity[];
-  onEmployeesChange?: () => void;
+  onEmployeesChange?: (updated: EmployeeEntity[]) => void;
 }
 
 const DEFAULT_FORM: EmployeeFormData = {
@@ -108,10 +108,11 @@ export function EmployeeCrud({ initialEmployees, onEmployeesChange }: EmployeeCr
   const handleDeleteSuccess = () => {
     if (!employeeToDelete) return;
     const removedName = employeeToDelete.fullName;
-    setEmployees((prev) => prev.filter((e) => e.id !== employeeToDelete.id));
+    const next = employees.filter((e) => e.id !== employeeToDelete.id);
+    setEmployees(next);
     setStatusMsg({ type: 'success', text: `Employee "${removedName}" has been removed with documented reason.` });
     if (editingId === employeeToDelete.id) resetForm();
-    if (onEmployeesChange) onEmployeesChange();
+    if (onEmployeesChange) onEmployeesChange(next);
     setEmployeeToDelete(null);
   };
 
@@ -125,15 +126,16 @@ export function EmployeeCrud({ initialEmployees, onEmployeesChange }: EmployeeCr
 
     if (res.success && res.employee) {
       const saved = res.employee;
-      if (editingId) {
-        setEmployees((prev) => prev.map((e) => (e.id === editingId ? saved : e)));
-        setStatusMsg({ type: 'success', text: `Employee ${saved.fullName} updated successfully.` });
-      } else {
-        setEmployees((prev) => [...prev, saved].sort((a, b) => a.epfNo - b.epfNo));
-        setStatusMsg({ type: 'success', text: `Employee ${saved.fullName} registered successfully.` });
-      }
+      const next = editingId
+        ? employees.map((e) => (e.id === editingId ? saved : e))
+        : [...employees, saved].sort((a, b) => a.epfNo - b.epfNo);
+      setEmployees(next);
+      setStatusMsg({
+        type: 'success',
+        text: `Employee ${saved.fullName} ${editingId ? 'updated' : 'registered'} successfully.`,
+      });
       resetForm();
-      if (onEmployeesChange) onEmployeesChange();
+      if (onEmployeesChange) onEmployeesChange(next);
     } else {
       setStatusMsg({ type: 'error', text: res.error || 'Failed to save employee.' });
     }

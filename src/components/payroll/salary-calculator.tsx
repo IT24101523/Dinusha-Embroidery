@@ -35,6 +35,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [specialLeaveAmt, setSpecialLeaveAmt] = useState<number>(0);
 
   const [attAllow, setAttAllow] = useState<number>(5000);
+  const [nightDays, setNightDays] = useState<number>(0);
+  const [nightRate, setNightRate] = useState<number>(0);
   const [nightAllow, setNightAllow] = useState<number>(0);
   const [gradeAllow, setGradeAllow] = useState<number>(0);
   const [transAllow, setTransAllow] = useState<number>(3750);
@@ -73,6 +75,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
         setAttAllow(d.attAllow);
         setNightAllow(d.nightAllow);
+        setNightDays(d.nightAllow > 0 ? 1 : 0);
+        setNightRate(d.nightAllow > 0 ? d.nightAllow : 0);
         setGradeAllow(d.gradeAllow);
         setTransAllow(d.transAllow);
 
@@ -92,6 +96,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setSpecialLeaveAmt(0);
 
         setAttAllow(5000);
+        setNightDays(0);
+        setNightRate(0);
         setNightAllow(0);
         setGradeAllow(currentEmployee!.role.includes('Supervisor') ? 35000 : 0);
         setTransAllow(3750);
@@ -386,18 +392,51 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Night Allowance (LKR)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  step={250}
-                  value={nightAllow}
-                  onChange={(e) => setNightAllow(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                />
+              <div className="p-2.5 rounded-lg bg-amber-50/40 border border-amber-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Night Allowance (LKR)
+                  </label>
+                  <span className="text-xs font-bold text-amber-800">
+                    = LKR {nightAllow.toLocaleString()}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                      Night Days (දින ගණන)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={nightDays}
+                      onChange={(e) => {
+                        const days = Math.max(0, Number(e.target.value) || 0);
+                        setNightDays(days);
+                        setNightAllow(Number((days * nightRate).toFixed(2)));
+                      }}
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">
+                      Per Night (එකකට LKR)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={50}
+                      value={nightRate}
+                      onChange={(e) => {
+                        const rate = Math.max(0, Number(e.target.value) || 0);
+                        setNightRate(rate);
+                        setNightAllow(Number((nightDays * rate).toFixed(2)));
+                      }}
+                      className="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>
