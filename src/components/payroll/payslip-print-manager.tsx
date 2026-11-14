@@ -83,13 +83,18 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
       });
   }, [employees, selectedIds, savedRecords, month]);
 
-  // Group into pairs of 2 for A4 pages (2 payslips per sheet)
+  // Group into chunks of 4 for A4 pages (4 payslips per sheet in 2x2 grid)
   const pairedSheets = useMemo(() => {
-    const pairs: [PayrollCalculationBreakdown, PayrollCalculationBreakdown | null][] = [];
-    for (let i = 0; i < payslipsToPrint.length; i += 2) {
-      pairs.push([payslipsToPrint[i], payslipsToPrint[i + 1] || null]);
+    const sheets: (PayrollCalculationBreakdown | null)[][] = [];
+    for (let i = 0; i < payslipsToPrint.length; i += 4) {
+      sheets.push([
+        payslipsToPrint[i],
+        payslipsToPrint[i + 1] || null,
+        payslipsToPrint[i + 2] || null,
+        payslipsToPrint[i + 3] || null,
+      ]);
     }
-    return pairs;
+    return sheets;
   }, [payslipsToPrint]);
 
   const totalBatchNet = useMemo(() => {
@@ -141,11 +146,11 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-400/20 text-amber-200 border border-amber-400/30 flex items-center gap-1">
                 <Scissors className="w-3 h-3" />
-                2 Payslips Per A4 Sheet
+                4 Payslips Per A4 Sheet
               </span>
             </div>
             <p className="text-xs text-slate-300">
-              Select staff below to batch print 2 official bilingual payslips per A4 page with center cut guide.
+              Select staff below to batch print 4 compact Sinhala payslips per A4 page (2×2 grid) with cut guides.
             </p>
           </div>
 
@@ -187,7 +192,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
             </span>
           </div>
           <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">A4 Sheets (2-Up)</span>
+            <span className="text-xs font-semibold text-slate-500">A4 Sheets (4-Up)</span>
             <span className="text-sm font-mono font-extrabold text-amber-700">
               {pairedSheets.length} Sheets
             </span>
@@ -293,7 +298,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
             __html: `
               @page {
                 size: A4 portrait;
-                margin: 5mm 7mm 5mm 7mm;
+                margin: 4mm 5mm 4mm 5mm;
               }
               @media print {
                 html, body {
@@ -327,7 +332,12 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
                   break-after: auto !important;
                   page-break-after: auto !important;
                 }
-                .payslip-half-block {
+                .payslip-grid-4up {
+                  display: grid !important;
+                  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                  gap: 3mm !important;
+                }
+                .payslip-quarter-block {
                   break-inside: avoid !important;
                   page-break-inside: avoid !important;
                 }
@@ -345,46 +355,38 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
             </p>
           </div>
         ) : (
-          pairedSheets.map((pair, sheetIndex) => {
-            const topSlip = pair[0];
-            const bottomSlip = pair[1];
+          pairedSheets.map((quad, sheetIndex) => {
+            const filledSlips = quad.filter((s): s is PayrollCalculationBreakdown => s !== null);
 
             return (
               <div
                 key={`sheet-${sheetIndex}`}
-                className="a4-sheet-container bg-white rounded-2xl border border-slate-300/90 shadow-lg ring-1 ring-slate-200/60 max-w-4xl mx-auto p-4 sm:p-6 mb-8 relative"
+                className="a4-sheet-container bg-white rounded-2xl border border-slate-300/90 shadow-lg ring-1 ring-slate-200/60 max-w-5xl mx-auto p-4 sm:p-5 mb-8 relative"
               >
                 {/* On-Screen Sheet Badge */}
-                <div className="print:hidden flex justify-between items-center text-[11px] font-bold text-slate-400 pb-2 mb-3 border-b border-slate-200">
-                  <span>A4 Sheet #{sheetIndex + 1} of {pairedSheets.length} (2-Up Format)</span>
-                  <span>
-                    Top: EPF {topSlip.epfNo} {topSlip.name} | Bottom:{' '}
-                    {bottomSlip ? `EPF ${bottomSlip.epfNo} ${bottomSlip.name}` : '(Half blank)'}
+                <div className="print:hidden flex flex-wrap justify-between items-center gap-2 text-[11px] font-bold text-slate-400 pb-2 mb-3 border-b border-slate-200">
+                  <span>A4 Sheet #{sheetIndex + 1} of {pairedSheets.length} (4-Up Format)</span>
+                  <span className="truncate max-w-xl">
+                    {filledSlips.map((s, i) => `#${i + 1} EPF ${s.epfNo} ${s.name}`).join(' | ')}
                   </span>
                 </div>
 
-                {/* Top Payslip (Slip 1 of 2 on this A4 sheet) */}
-                <div className="payslip-half-block">
-                  <PayslipSingleItem record={topSlip} formatLkr={formatLkr} />
-                </div>
-
-                {/* Cutting Guide Line in the middle of A4 Sheet */}
-                <div className="my-2 border-t-2 border-dashed border-slate-400 relative text-center flex items-center justify-center">
-                  <span className="bg-white px-3 text-[10px] text-slate-500 font-mono flex items-center gap-1.5 -mt-2">
-                    <Scissors className="w-3 h-3 text-slate-600" />
-                    <span>කැපීම සඳහා සලකුණ / Cut Here (Center of A4 Sheet)</span>
-                  </span>
-                </div>
-
-                {/* Bottom Payslip (Slip 2 of 2 on this A4 sheet) */}
-                <div className="payslip-half-block">
-                  {bottomSlip ? (
-                    <PayslipSingleItem record={bottomSlip} formatLkr={formatLkr} />
-                  ) : (
-                    <div className="h-64 border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-xs text-slate-400 print:hidden">
-                      Empty second slot on this A4 page
+                {/* 2x2 Grid of 4 Compact Payslips */}
+                <div className="payslip-grid-4up grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {quad.map((slip, slotIdx) => (
+                    <div
+                      key={`slot-${sheetIndex}-${slotIdx}`}
+                      className="payslip-quarter-block border border-dashed border-slate-300 p-1 print:border-slate-400 print:p-[1mm]"
+                    >
+                      {slip ? (
+                        <PayslipSingleItem record={slip} formatLkr={formatLkr} />
+                      ) : (
+                        <div className="h-full min-h-[260px] border border-dashed border-slate-200 rounded flex items-center justify-center text-[11px] text-slate-400 print:hidden">
+                          Empty slot #{slotIdx + 1} on this A4 page
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
             );
@@ -396,7 +398,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
 }
 
 /**
- * Compact Single Payslip item designed to fit precisely 2-up per A4 portrait page
+ * Ultra-compact Single Payslip item designed to fit 4-up (2x2) per A4 portrait page
  */
 function PayslipSingleItem({
   record,
@@ -406,105 +408,105 @@ function PayslipSingleItem({
   formatLkr: (n: number) => string;
 }) {
   return (
-    <div className="font-sans text-black border border-black p-3 text-[11px] leading-tight bg-white">
+    <div className="font-sans text-black border border-black p-1.5 text-[8px] leading-[1.2] bg-white">
       {/* Title */}
-      <div className="text-center border-b border-black pb-1 mb-2">
-        <h2 className="text-base font-black tracking-wide text-black font-serif">
+      <div className="text-center border-b border-black pb-0.5 mb-1">
+        <h2 className="text-[11px] font-black tracking-wide text-black font-serif">
           වැටුප් පත්‍රිකාව ({record.month})
         </h2>
       </div>
 
-      {/* Top Meta Info Grid (Exact layout as Image 2) */}
-      <div className="border border-black mb-2 text-[10px]">
-        <table className="w-full border-collapse">
+      {/* Top Meta Info Grid */}
+      <div className="border border-black mb-1 text-[7.5px] leading-[1.15]">
+        <table className="w-full border-collapse table-fixed">
           <tbody>
             <tr className="border-b border-black">
-              <td className="w-1/4 py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="w-[22%] py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 නම
               </td>
-              <td className="w-1/4 py-0.5 px-2 font-semibold border-r border-black truncate">
+              <td className="w-[28%] py-[1px] px-1 font-semibold border-r border-black truncate">
                 {record.name}
               </td>
-              <td colSpan={2} className="w-1/2 py-0.5 px-2 font-bold text-center bg-slate-50">
-                කර්මාන්ත ශාලාව විසින් සේවකයා වෙත කරන ගෙවීම්
+              <td colSpan={2} className="w-[50%] py-[1px] px-1 font-bold text-center bg-slate-50 truncate">
+                ආයතනය වෙතින් ගෙවීම්
               </td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 මාසය
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-medium">
+              <td className="py-[1px] px-1 border-r border-black font-medium truncate">
                 {record.month}
               </td>
-              <td className="w-1/4 py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="w-[26%] py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 සේ.භා.අ 3%
               </td>
-              <td className="w-1/4 py-0.5 px-2 text-right font-mono font-bold">
+              <td className="w-[24%] py-[1px] px-1 text-right font-mono font-bold">
                 {formatLkr(record.etf3)}
               </td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 සේ.අ.අ අංකය
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-mono font-black text-xs">
+              <td className="py-[1px] px-1 border-r border-black font-mono font-black text-[8.5px]">
                 {record.epfNo}
               </td>
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 සේ.අ.අ 12%
               </td>
-              <td className="py-0.5 px-2 text-right font-mono font-bold">
+              <td className="py-[1px] px-1 text-right font-mono font-bold">
                 {formatLkr(record.epf12)}
               </td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 තනතුර
               </td>
-              <td className="py-0.5 px-2 border-r border-black truncate font-medium">
+              <td className="py-[1px] px-1 border-r border-black truncate font-medium">
                 {record.role}
               </td>
               <td colSpan={2} className="border-black"></td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
-                දෙපාර්තමේන්තුව
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
+                අංශය
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-medium">
+              <td className="py-[1px] px-1 border-r border-black truncate font-medium">
                 {record.department || 'නිෂ්පාදන අංශය'}
               </td>
               <td colSpan={2} className="border-black"></td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 ශ්‍රේණිය
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-medium">
+              <td className="py-[1px] px-1 border-r border-black truncate font-medium">
                 {record.grade || '-'}
               </td>
               <td colSpan={2} className="border-black"></td>
             </tr>
 
             <tr className="border-b border-black">
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
-                සේවක බැංකුව
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
+                බැංකුව
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-medium">
+              <td className="py-[1px] px-1 border-r border-black truncate font-medium">
                 {record.bankName || '-'}
               </td>
               <td colSpan={2} className="border-black"></td>
             </tr>
 
             <tr>
-              <td className="py-0.5 px-2 font-bold border-r border-black bg-slate-50">
+              <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 ගිණුම් අංකය
               </td>
-              <td className="py-0.5 px-2 border-r border-black font-mono font-semibold">
+              <td className="py-[1px] px-1 border-r border-black font-mono font-semibold truncate">
                 {record.accountNo || '-'}
               </td>
               <td colSpan={2} className="border-black"></td>
@@ -514,145 +516,149 @@ function PayslipSingleItem({
       </div>
 
       {/* Two Columns: Earnings (එකතු කිරීම්) & Deductions (අඩුකිරීම්) */}
-      <div className="grid grid-cols-2 gap-4 text-[10px]">
+      <div className="grid grid-cols-2 gap-1.5 text-[7.5px] leading-[1.2]">
         {/* Earnings */}
-        <div>
-          <div className="text-center font-bold border-b border-black pb-0.5 mb-1.5">
-            එකතු කිරීම්
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <span>මූලික වැටුප</span>
-              <span className="font-mono font-semibold">{formatLkr(record.basic)}</span>
+        <div className="flex flex-col justify-between">
+          <div>
+            <div className="text-center font-bold border-b border-black pb-[1px] mb-0.5">
+              එකතු කිරීම්
             </div>
 
-            <div className="flex justify-between items-center">
-              <span>නිෂ්පාදන දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.prodAllow)}</span>
-            </div>
+            <div className="space-y-[1.5px]">
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">මූලික වැටුප</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.basic)}</span>
+              </div>
 
-            <div className="flex justify-between items-center">
-              <span>ශ්‍රේණිගත දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.gradeAllow)}</span>
-            </div>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">නිෂ්පාදන දීමනාව</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.prodAllow)}</span>
+              </div>
 
-            <div className="flex justify-between items-center">
-              <span>පැමිණීමේ දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.attAllow)}</span>
-            </div>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">ශ්‍රේණිගත දීමනාව</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.gradeAllow)}</span>
+              </div>
 
-            <div className="flex justify-between items-center">
-              <span>ප්‍රවාහන දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.transAllow)}</span>
-            </div>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">පැමිණීමේ දීමනාව</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.attAllow)}</span>
+              </div>
 
-            <div className="flex justify-between items-center">
-              <span>රාත්‍රී දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.nightAllow)}</span>
-            </div>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">ප්‍රවාහන දීමනාව</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.transAllow)}</span>
+              </div>
 
-            {/* Normal OT */}
-            <div className="flex justify-between items-center">
-              <span>සාමාන්‍ය අතිකාල දීමනාව</span>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block border border-black px-1.5 py-0.2 text-[9px] font-mono font-bold bg-slate-50 min-w-10 text-center">
-                  {record.otHours}
-                </span>
-                <span className="font-mono font-semibold min-w-14 text-right">
-                  {formatLkr(record.otAmt)}
-                </span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">රාත්‍රී දීමනාව</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.nightAllow)}</span>
+              </div>
+
+              {/* Normal OT */}
+              <div className="flex justify-between items-center gap-0.5">
+                <span className="truncate">සාමාන්‍ය OT</span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <span className="inline-block border border-black px-0.5 text-[7px] font-mono font-bold bg-slate-50 min-w-5 text-center">
+                    {record.otHours}
+                  </span>
+                  <span className="font-mono font-semibold text-right">
+                    {formatLkr(record.otAmt)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Double OT */}
+              <div className="flex justify-between items-center gap-0.5">
+                <span className="truncate">ද්විත්ව OT</span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <span className="inline-block border border-black px-0.5 text-[7px] font-mono font-bold bg-slate-50 min-w-5 text-center">
+                    {record.sotHours}
+                  </span>
+                  <span className="font-mono font-semibold text-right">
+                    {formatLkr(record.sotAmt)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">ත්‍රිත්ව OT</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.totAmt)}</span>
+              </div>
+
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">පොහෝය දින</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.poyaDayAmt)}</span>
+              </div>
+
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">ඉරිදා ගෙවීම්</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.sundayAmt)}</span>
+              </div>
+
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">විශේෂ නිවාඩු</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.specialLeaveAmt)}</span>
               </div>
             </div>
-
-            {/* Double OT */}
-            <div className="flex justify-between items-center">
-              <span>ද්විත්ව අතිකාල දීමනාව</span>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block border border-black px-1.5 py-0.2 text-[9px] font-mono font-bold bg-slate-50 min-w-10 text-center">
-                  {record.sotHours}
-                </span>
-                <span className="font-mono font-semibold min-w-14 text-right">
-                  {formatLkr(record.sotAmt)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <span>ත්‍රිත්ව අතිකාල දීමනාව</span>
-              <span className="font-mono font-semibold">{formatLkr(record.totAmt)}</span>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <span>පොහෝය දින</span>
-              <span className="font-mono font-semibold">{formatLkr(record.poyaDayAmt)}</span>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <span>ඉරිදා ගෙවීම්</span>
-              <span className="font-mono font-semibold">{formatLkr(record.sundayAmt)}</span>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <span>විශේෂ නිවාඩු</span>
-              <span className="font-mono font-semibold">{formatLkr(record.specialLeaveAmt)}</span>
-            </div>
           </div>
 
-          <div className="mt-2 pt-1 border-t border-b border-black flex justify-between items-center font-bold text-[11px]">
+          <div className="mt-1 pt-[1px] border-t border-b border-black flex justify-between items-center font-bold text-[8px]">
             <span>දළ වැටුප</span>
             <span className="font-mono font-black">{formatLkr(record.gross)}</span>
           </div>
         </div>
 
         {/* Deductions */}
-        <div>
-          <div className="text-center font-bold border-b border-black pb-0.5 mb-1.5">
-            අඩුකිරීම්
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="font-bold">දළ වැටුප</span>
-              <span className="font-mono font-semibold">{formatLkr(record.gross)}</span>
+        <div className="flex flex-col justify-between">
+          <div>
+            <div className="text-center font-bold border-b border-black pb-[1px] mb-0.5">
+              අඩුකිරීම්
             </div>
 
-            <div className="flex justify-between items-center">
-              <span>සේ.අ.අ 8%</span>
-              <span className="font-mono font-semibold">{formatLkr(record.epf8)}</span>
-            </div>
+            <div className="space-y-[1.5px]">
+              <div className="flex justify-between items-center gap-1">
+                <span className="font-bold truncate">දළ වැටුප</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.gross)}</span>
+              </div>
 
-            <div className="flex justify-between items-center">
-              <span>ප්‍රමාද හා වේලාසන පිටවීම</span>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block border border-black px-1 py-0.2 text-[9px] font-mono font-bold bg-slate-50 min-w-8 text-center">
-                  {record.lateHours}
-                </span>
-                <span className="font-mono font-semibold min-w-14 text-right">
-                  {formatLkr(record.lateDeduction)}
-                </span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">සේ.අ.අ 8%</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.epf8)}</span>
+              </div>
+
+              <div className="flex justify-between items-center gap-0.5">
+                <span className="truncate">ප්‍රමාද පිටවීම</span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <span className="inline-block border border-black px-0.5 text-[7px] font-mono font-bold bg-slate-50 min-w-5 text-center">
+                    {record.lateHours}
+                  </span>
+                  <span className="font-mono font-semibold text-right">
+                    {formatLkr(record.lateDeduction)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center gap-0.5">
+                <span className="truncate">නිවාඩු (දින)</span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <span className="inline-block border border-black px-0.5 text-[7px] font-mono font-bold bg-slate-50 min-w-5 text-center">
+                    {record.unpaidDays}
+                  </span>
+                  <span className="font-mono font-semibold text-right">
+                    {formatLkr(record.unpaidDeduction)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center gap-1">
+                <span className="truncate">වැටුප් අත්තිකාරම්</span>
+                <span className="font-mono font-semibold shrink-0">{formatLkr(record.advance)}</span>
               </div>
             </div>
-
-            <div className="flex justify-between items-center">
-              <span>වැටුප් රහිත නිවාඩු (දින)</span>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block border border-black px-1 py-0.2 text-[9px] font-mono font-bold bg-slate-50 min-w-8 text-center">
-                  {record.unpaidDays}
-                </span>
-                <span className="font-mono font-semibold min-w-14 text-right">
-                  {formatLkr(record.unpaidDeduction)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <span>වැටුප් අත්තිකාරම්</span>
-              <span className="font-mono font-semibold">{formatLkr(record.advance)}</span>
-            </div>
           </div>
 
-          <div className="mt-6 pt-1 border-t border-black flex justify-between items-center font-bold text-[11px]">
+          <div className="mt-1 pt-[1px] border-t border-b border-black flex justify-between items-center font-bold text-[8px]">
             <span>මුළු අඩුකිරීම්</span>
             <span className="font-mono font-black">{formatLkr(record.totalDeductions)}</span>
           </div>
@@ -660,22 +666,22 @@ function PayslipSingleItem({
       </div>
 
       {/* Final Net Pay Row */}
-      <div className="mt-3 pt-2 border-t border-black flex justify-between items-center text-xs">
+      <div className="mt-1 pt-1 border-t border-black flex justify-between items-center text-[8.5px]">
         <div className="font-bold text-slate-800">
-          දළ වැටුප: <span className="font-mono font-bold ml-1">{formatLkr(record.gross)}</span>
+          දළ: <span className="font-mono font-bold">{formatLkr(record.gross)}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-black text-sm">ශුද්ධ වැටුප:</span>
-          <span className="font-mono font-black text-base border-b-2 border-double border-black pb-0.5">
+        <div className="flex items-center gap-1">
+          <span className="font-black text-[9px]">ශුද්ධ වැටුප:</span>
+          <span className="font-mono font-black text-[10px] border-b-2 border-double border-black">
             {formatLkr(record.net)}
           </span>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="mt-2 pt-1 text-center text-[10px] font-semibold border-t border-slate-300">
+      <div className="mt-1 pt-[1px] text-center text-[7px] font-semibold border-t border-slate-300">
         <span>ඔබගේ සේවය සඳහා ස්තූතියි</span> —{' '}
-        <span className="font-mono text-[9px] text-slate-700">දුරකථන - 0760958645 / 0332258961</span>
+        <span className="font-mono text-[6.5px] text-slate-700">දුරකථන - 0760958645 / 0332258961</span>
       </div>
     </div>
   );
