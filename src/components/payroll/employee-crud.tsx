@@ -173,7 +173,6 @@ export function EmployeeCrud({
     formData.hasNicCopy,
     formData.hasBirthCertificate,
     formData.hasGramasewakaCert,
-    formData.hasPoliceReport,
     formData.hasMedicalReport,
     formData.hasAppointmentLetter,
   ].filter(Boolean).length;
@@ -188,12 +187,11 @@ export function EmployeeCrud({
           emp.hasNicCopy,
           emp.hasBirthCertificate,
           emp.hasGramasewakaCert,
-          emp.hasPoliceReport,
           emp.hasMedicalReport,
           emp.hasAppointmentLetter,
         ].filter(Boolean).length;
-        if (docFilter === 'COMPLETE' && docCount !== 6) return false;
-        if (docFilter === 'INCOMPLETE' && docCount === 6) return false;
+        if (docFilter === 'COMPLETE' && docCount !== 5) return false;
+        if (docFilter === 'INCOMPLETE' && docCount === 5) return false;
 
         if (!q) return true;
         return (
@@ -381,7 +379,6 @@ export function EmployeeCrud({
     { key: 'hasNicCopy', label: 'NIC / ID Copy' },
     { key: 'hasBirthCertificate', label: 'Birth Certificate' },
     { key: 'hasGramasewakaCert', label: 'Grama Niladhari Cert' },
-    { key: 'hasPoliceReport', label: 'Police Report' },
     { key: 'hasMedicalReport', label: 'Medical Certificate' },
     { key: 'hasAppointmentLetter', label: 'Appointment Letter' },
   ];
@@ -1060,14 +1057,14 @@ export function EmployeeCrud({
                   Personal File Checklist
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white border border-amber-300 text-amber-900">
-                  {formDocCount}/6 Verified
+                  {formDocCount}/5 Verified
                 </span>
               </div>
 
               <div className="h-1.5 w-full rounded-full bg-amber-200/70 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-300"
-                  style={{ width: `${Math.round((formDocCount / 6) * 100)}%` }}
+                  style={{ width: `${Math.round((formDocCount / 5) * 100)}%` }}
                 />
               </div>
 
@@ -1204,7 +1201,7 @@ export function EmployeeCrud({
                   }`}
                 >
                   <UserCheck className="w-3 h-3" />
-                  6/6 Done
+                  5/5 Done
                 </button>
                 <button
                   type="button"
@@ -1262,7 +1259,6 @@ export function EmployeeCrud({
                       emp.hasNicCopy,
                       emp.hasBirthCertificate,
                       emp.hasGramasewakaCert,
-                      emp.hasPoliceReport,
                       emp.hasMedicalReport,
                       emp.hasAppointmentLetter,
                     ];
@@ -1340,16 +1336,16 @@ export function EmployeeCrud({
                           <div className="space-y-1">
                             <span
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                docCount === 6
+                                docCount === 5
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : docCount >= 3
                                   ? 'bg-amber-100 text-amber-800'
                                   : 'bg-rose-100 text-rose-800'
                               }`}
-                              title={`${docCount}/6 Personal file documents verified`}
+                              title={`${docCount}/5 Personal file documents verified`}
                             >
                               <FileCheck className="w-3 h-3" />
-                              {docCount}/6
+                              {docCount}/5
                             </span>
                             <div className="flex items-center gap-0.5" aria-hidden="true">
                               {docFlags.map((ok, i) => (

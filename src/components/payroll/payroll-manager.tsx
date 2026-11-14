@@ -65,8 +65,8 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
       {
         id: 'printManager',
         label: 'Payslips',
-        subtitle: '2-Per-A4 Bilingual Batch Print',
-        badge: '2/A4',
+        subtitle: '4-Per-A4 Sinhala Batch Print',
+        badge: '4/A4',
         icon: Printer,
       },
       {
@@ -102,28 +102,28 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
 
   return (
     <div className="min-h-screen app-mesh-bg text-slate-900 flex flex-col lg:flex-row font-sans print:block print:min-h-0 print:bg-white">
-      {/* Desktop Enterprise Sidebar */}
-      <aside className="hidden lg:flex lg:w-72 shrink-0 bg-slate-950 text-white flex-col justify-between border-r border-slate-800/80 sticky top-0 h-screen print:hidden">
-        <div className="p-5 space-y-6 overflow-y-auto scrollbar-thin">
+      {/* Desktop Enterprise Sidebar (Icon-only by default, expands on hover) */}
+      <aside className="hidden lg:flex lg:w-[76px] hover:lg:w-72 shrink-0 bg-slate-950 text-white flex-col justify-between border-r border-slate-800/80 sticky top-0 h-screen print:hidden transition-all duration-200 ease-out group/sidebar overflow-hidden z-30">
+        <div className="p-3.5 group-hover/sidebar:p-5 space-y-5 group-hover/sidebar:space-y-6 overflow-y-auto overflow-x-hidden scrollbar-thin transition-all duration-200">
           {/* Brand Identity */}
-          <div className="flex items-center gap-3 pb-5 border-b border-slate-800/90">
+          <div className="flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 pb-4 group-hover/sidebar:pb-5 border-b border-slate-800/90 transition-all duration-200">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-indigo-950/60 ring-1 ring-white/15 shrink-0">
               D
             </div>
-            <div className="min-w-0">
+            <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
               <div className="font-extrabold text-white tracking-tight text-sm truncate">
                 Dinusha Embroidery
               </div>
               <div className="text-[11px] font-medium text-indigo-300/90 flex items-center gap-1.5 mt-0.5">
                 <Sparkles className="w-3 h-3 shrink-0" />
-                <span>Enterprise HR & Payroll</span>
+                <span>Enterprise HR &amp; Payroll</span>
               </div>
             </div>
           </div>
 
           {/* Navigation Tablist (Desktop Vertical) */}
           <div className="space-y-2">
-            <div className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap transition-all duration-200">
               Payroll Modules
             </div>
             <div
@@ -142,15 +142,16 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
                     role="tab"
                     id={`${tabIdPrefix}-desktop-${item.id}`}
                     aria-selected={isSelected}
+                    title={item.label}
                     onClick={() => setActiveTab(item.id)}
-                    className={`relative w-full text-left px-3.5 py-2.5 rounded-xl transition flex items-center gap-3 group cursor-pointer ${
+                    className={`relative w-full text-left px-2.5 group-hover/sidebar:px-3.5 py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 group cursor-pointer ${
                       isSelected
                         ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm after:content-[""] after:absolute after:left-0 after:top-2 after:bottom-2 after:w-1 after:rounded-r-full after:bg-indigo-400'
                         : 'text-slate-300 hover:bg-slate-900 hover:text-white'
                     }`}
                   >
                     <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition ${
+                      className={`w-9 h-9 group-hover/sidebar:w-8 group-hover/sidebar:h-8 rounded-lg flex items-center justify-center shrink-0 transition ${
                         isSelected
                           ? 'bg-indigo-500 text-white shadow-sm'
                           : 'bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200'
@@ -158,7 +159,7 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
                     >
                       <Icon className="w-4 h-4" />
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:flex-1 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold truncate">{item.label}</span>
                         {item.badge && (
@@ -183,21 +184,25 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
         </div>
 
         {/* Factory Compliance & Reg Footer */}
-        <div className="p-4 border-t border-slate-800/90 bg-slate-950/80">
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
+        <div className="p-3 group-hover/sidebar:p-4 border-t border-slate-800/90 bg-slate-950/80 transition-all duration-200">
+          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5 group-hover/sidebar:p-3.5 space-y-0 group-hover/sidebar:space-y-2 transition-all duration-200">
+            <div className="flex items-center justify-center group-hover/sidebar:justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-indigo-400" />
-                Factory Entity
+                <Building2 className="w-4 h-4 group-hover/sidebar:w-3.5 group-hover/sidebar:h-3.5 text-indigo-400 shrink-0" />
+                <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
+                  Factory Entity
+                </span>
               </span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+              <span className="hidden group-hover/sidebar:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 whitespace-nowrap">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Live Sync
               </span>
             </div>
-            <div className="text-xs font-bold text-slate-100">Dinusha Embroidery (Pvt) Ltd</div>
-            <div className="text-[11px] font-mono text-slate-400">
-              Reg: 1G 014585 • Weliweriya
+            <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 transition-all duration-200 whitespace-nowrap">
+              <div className="text-xs font-bold text-slate-100">Dinusha Embroidery (Pvt) Ltd</div>
+              <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                Reg: 1G 014585 • Weliweriya
+              </div>
             </div>
           </div>
         </div>
