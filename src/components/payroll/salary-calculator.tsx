@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
 import {
   MonthlySalaryInputData,
@@ -74,6 +74,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [shakeSaveBtn, setShakeSaveBtn] = useState(false);
+  const [pendingUpdateData, setPendingUpdateData] = useState<MonthlySalaryInputData | null>(null);
+  const confirmUpdateDialogRef = useRef<HTMLDialogElement | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
@@ -167,6 +169,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   }, [currentEmployee, month]);
 
   const isPaidLocked = recordStatus === 'PAID';
+  const isExistingRecord = recordStatus !== null && recordStatus !== 'PAID';
   const isAllowanceLocked = unpaidDays > 6;
   const inputsDisabled = isAllowanceLocked || isPaidLocked;
   const unpaidHours = Number((unpaidDays * 8).toFixed(2));
@@ -275,6 +278,66 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     return parsed.data;
   };
 
+  useEffect(() => {
+    const dialog = confirmUpdateDialogRef.current;
+    if (!dialog) return;
+
+    dialog.setAttribute('closedby', 'any');
+
+    if (pendingUpdateData && !dialog.open) {
+      dialog.showModal();
+    } else if (!pendingUpdateData && dialog.open) {
+      dialog.close();
+    }
+
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const isOutside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return (
+          e.clientX < r.left ||
+          e.clientX > r.right ||
+          e.clientY < r.top ||
+          e.clientY > r.bottom
+        );
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = isOutside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (pressedOutside && isOutside(e)) {
+          setPendingUpdateData(null);
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener('pointerdown', onPointerDown);
+      dialog.addEventListener('pointerup', onPointerUp);
+      return () => {
+        dialog.removeEventListener('pointerdown', onPointerDown);
+        dialog.removeEventListener('pointerup', onPointerUp);
+      };
+    }
+  }, [pendingUpdateData]);
+
+  const executeSave = async (validated: MonthlySalaryInputData) => {
+    if (!currentEmployee) return;
+    setLoading(true);
+    const res = await saveMonthlySalaryAction(validated);
+    setLoading(false);
+
+    if (res.success && res.breakdown) {
+      setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
+      setPendingUpdateData(null);
+      setStatusMsg({
+        type: 'success',
+        text: 'Successful',
+      });
+    } else {
+      setPendingUpdateData(null);
+      triggerErrorFeedback(res.error || 'Failed to save salary record.');
+    }
+  };
+
   const handleSave = async () => {
     if (!currentEmployee || !calculation) return;
     setStatusMsg(null);
@@ -282,19 +345,12 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     const validated = validateSalaryInput();
     if (!validated) return;
 
-    setLoading(true);
-    const res = await saveMonthlySalaryAction(validated);
-    setLoading(false);
-
-    if (res.success && res.breakdown) {
-      setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
-      setStatusMsg({
-        type: 'success',
-        text: 'Successful',
-      });
-    } else {
-      triggerErrorFeedback(res.error || 'Failed to save salary record.');
+    if (isExistingRecord) {
+      setPendingUpdateData(validated);
+      return;
     }
+
+    await executeSave(validated);
   };
 
   const handleAdminUnlock = async (adminPin: string, adminReason: string) => {
@@ -1069,16 +1125,79 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               type="button"
               onClick={handleSave}
               disabled={loading}
-              className={`px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap ${
-                shakeSaveBtn ? 'animate-shake ring-2 ring-rose-400 bg-rose-600 hover:bg-rose-600' : ''
+              className={`px-5 py-2.5 rounded-xl text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap ${
+                shakeSaveBtn
+                  ? 'animate-shake ring-2 ring-rose-400 bg-rose-600 hover:bg-rose-600'
+                  : isExistingRecord
+                  ? 'bg-amber-600 hover:bg-amber-500'
+                  : 'bg-indigo-600 hover:bg-indigo-500'
               }`}
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save &amp; Update Salary
+              {isExistingRecord ? 'Update Salary' : 'Save Salary'}
             </button>
           )}
         </div>
       </div>
+
+      {/* Update Confirmation Native Dialog */}
+      <dialog
+        ref={confirmUpdateDialogRef}
+        aria-labelledby="confirm-update-title"
+        onClose={() => setPendingUpdateData(null)}
+        className="m-auto w-[min(30rem,calc(100vw-2rem))] rounded-2xl border border-amber-200/90 bg-white p-0 shadow-2xl text-slate-900"
+      >
+        <div className="flex flex-col overflow-hidden rounded-2xl">
+          <div className="bg-gradient-to-r from-slate-900 via-amber-950 to-slate-900 text-white px-5 py-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 id="confirm-update-title" className="text-base font-bold text-white">
+                Confirm Salary Update
+              </h3>
+              <p className="text-xs text-amber-200/90 mt-0.5">
+                Are you sure you want to overwrite the saved salary record?
+              </p>
+            </div>
+          </div>
+
+          <div className="p-5 space-y-3 text-sm text-slate-700">
+            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-3.5 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800">
+                  EPF #{currentEmployee.epfNo}
+                </span>
+                <span className="text-xs font-semibold text-slate-500">{month}</span>
+              </div>
+              <div className="font-extrabold text-slate-900 text-sm">{currentEmployee.fullName}</div>
+              <div className="text-xs font-mono font-bold text-emerald-700">
+                Updated Net Salary: LKR {formatLkr2(calculation?.net || 0)}
+              </div>
+            </div>
+            <p className="text-xs text-slate-600">
+              This will replace the previously saved salary values for <strong>{month}</strong>.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 border-t border-slate-200/80 px-5 py-3.5 flex items-center justify-end gap-2.5">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setPendingUpdateData(null)}
+              className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={loading || !pendingUpdateData}
+              onClick={() => pendingUpdateData && executeSave(pendingUpdateData)}
+              className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Yes, Update Salary
+            </button>
+          </div>
+        </div>
+      </dialog>
 
       {unlockModalOpen && (
         <AdminUnlockModal
