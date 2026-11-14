@@ -7,6 +7,21 @@ export const SUNDAY_OT_MULTIPLIER = 2.0;
 export const EPF_EMPLOYEE_RATE = 0.08; // 8%
 export const EPF_EMPLOYER_RATE = 0.12; // 12%
 export const ETF_EMPLOYER_RATE = 0.03; // 3%
+export const FULL_ATTENDANCE_ALLOWANCE = 5000;
+export const ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE = 2500;
+
+/**
+ * Attendance allowance rule:
+ * - 0 unpaid/absent days: LKR 5,000
+ * - > 0 and <= 1 unpaid/absent day: LKR 2,500
+ * - > 1 unpaid/absent day: LKR 0
+ */
+export function calculateAttendanceAllowance(unpaidDays: number): number {
+  const days = Math.max(0, Number(unpaidDays) || 0);
+  if (days === 0) return FULL_ATTENDANCE_ALLOWANCE;
+  if (days <= 1) return ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE;
+  return 0;
+}
 
 export function calculateSalaryForEmployee(
   employee: EmployeeEntity,
@@ -23,7 +38,7 @@ export function calculateSalaryForEmployee(
   const isAllowanceLocked = unpaidDays > 6;
 
   // Allowances
-  const attAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.attAllow) || 0);
+  const attAllow = isAllowanceLocked ? 0 : calculateAttendanceAllowance(unpaidDays);
   const nightAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.nightAllow) || 0);
   const gradeAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.gradeAllow) || 0);
   const transAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.transAllow) || 0);

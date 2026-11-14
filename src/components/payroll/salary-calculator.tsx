@@ -6,7 +6,10 @@ import {
   MonthlySalaryInputData,
   monthlySalaryInputSchema,
 } from '@/modules/payroll/domain/validation';
-import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
+import {
+  calculateSalaryForEmployee,
+  calculateAttendanceAllowance,
+} from '@/modules/payroll/domain/calculator';
 import {
   saveMonthlySalaryAction,
   fetchSalaryRecordAction,
@@ -54,7 +57,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [sundayAmt, setSundayAmt] = useState<number>(0);
   const [specialLeaveAmt, setSpecialLeaveAmt] = useState<number>(0);
 
-  const [attAllow, setAttAllow] = useState<number>(5000);
   const [nightDays, setNightDays] = useState<number>(0);
   const [nightRate, setNightRate] = useState<number>(0);
   const [nightAllow, setNightAllow] = useState<number>(0);
@@ -122,7 +124,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setSundayAmt(d.sundayAmt);
         setSpecialLeaveAmt(d.specialLeaveAmt);
 
-        setAttAllow(d.attAllow);
         setNightAllow(d.nightAllow);
         setNightDays(d.nightAllow > 0 ? 1 : 0);
         setNightRate(d.nightAllow > 0 ? d.nightAllow : 0);
@@ -146,7 +147,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setSundayAmt(0);
         setSpecialLeaveAmt(0);
 
-        setAttAllow(5000);
         setNightDays(0);
         setNightRate(0);
         setNightAllow(0);
@@ -171,6 +171,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const isPaidLocked = recordStatus === 'PAID';
   const isExistingRecord = recordStatus !== null && recordStatus !== 'PAID';
   const isAllowanceLocked = unpaidDays > 6;
+  const attAllow = isAllowanceLocked ? 0 : calculateAttendanceAllowance(unpaidDays);
   const inputsDisabled = isAllowanceLocked || isPaidLocked;
   const unpaidHours = Number((unpaidDays * 8).toFixed(2));
   const unpaidThresholdPct = Math.min(100, Math.round((unpaidDays / 6) * 100));
@@ -690,19 +691,40 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
             <div className="space-y-2">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                  Attendant Allowance (Fixed 5,000)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={200000}
-                  step={500}
-                  disabled={inputsDisabled}
-                  value={isAllowanceLocked ? 0 : attAllow}
-                  onChange={(e) => setAttAllow(clampNumber(e.target.value, 0, 200000))}
-                  className="w-full px-2.5 py-1.5 text-xs font-mono font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                />
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Attendance Allowance
+                  </label>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                      attAllow === 5000
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : attAllow === 2500
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-rose-100 text-rose-700'
+                    }`}
+                  >
+                    {unpaidDays === 0
+                      ? '0d Absent • Full'
+                      : unpaidDays <= 1
+                      ? '≤1d Absent • Half'
+                      : '>1d Absent • None'}
+                  </span>
+                </div>
+                <div
+                  className={`w-full px-2.5 py-1.5 text-xs font-mono font-extrabold border rounded-lg flex items-center justify-between ${
+                    attAllow === 5000
+                      ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'
+                      : attAllow === 2500
+                      ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                      : 'bg-slate-100 border-slate-200 text-slate-500'
+                  }`}
+                >
+                  <span>LKR {attAllow.toLocaleString()}</span>
+                  <span className="text-[10px] font-sans font-medium opacity-75">
+                    0d: 5k | 1d: 2.5k | &gt;1d: 0
+                  </span>
+                </div>
               </div>
 
               <div className="p-2 rounded-lg bg-amber-50/50 border border-amber-200/90 space-y-1.5">
