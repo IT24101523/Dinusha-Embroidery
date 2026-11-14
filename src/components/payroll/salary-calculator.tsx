@@ -25,9 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
-  BadgeCheck,
   Unlock,
-  ShieldAlert,
 } from 'lucide-react';
 
 function clampNumber(raw: string, min: number, max: number): number {
@@ -75,9 +73,19 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [shakeSaveBtn, setShakeSaveBtn] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
+
+  const triggerErrorFeedback = (message: string) => {
+    setStatusMsg({ type: 'error', text: message });
+    setShakeSaveBtn(false);
+    requestAnimationFrame(() => {
+      setShakeSaveBtn(true);
+    });
+    setTimeout(() => setShakeSaveBtn(false), 450);
+  };
 
   // Active employee
   const currentEmployee = useMemo(() => {
@@ -222,10 +230,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     if (!currentEmployee || !calculation) return null;
 
     if (isPaidLocked) {
-      setStatusMsg({
-        type: 'error',
-        text: 'This salary has already been marked as PAID and is locked. Admin authorization is required to unlock it before updating.',
-      });
+      triggerErrorFeedback(
+        'This salary is already Paid & Locked. Click Admin Unlock first to modify it.'
+      );
       return null;
     }
 
@@ -252,19 +259,16 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
     const parsed = monthlySalaryInputSchema.safeParse(inputData);
     if (!parsed.success) {
-      setStatusMsg({
-        type: 'error',
-        text:
-          parsed.error.issues[0]?.message || 'Invalid salary input values. Please check your entries.',
-      });
+      triggerErrorFeedback(
+        parsed.error.issues[0]?.message || 'Invalid salary values. Please check your entries.'
+      );
       return null;
     }
 
     if (calculation.totalDeductions > calculation.gross) {
-      setStatusMsg({
-        type: 'error',
-        text: `Cannot save: Total deductions (LKR ${formatLkr2(calculation.totalDeductions)}) exceed gross earnings (LKR ${formatLkr2(calculation.gross)}). Reduce Salary Advance or absence/late deductions first.`,
-      });
+      triggerErrorFeedback(
+        `Deductions (LKR ${formatLkr2(calculation.totalDeductions)}) exceed Gross (LKR ${formatLkr2(calculation.gross)}). Reduce advance or absences.`
+      );
       return null;
     }
 
@@ -286,10 +290,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
       setStatusMsg({
         type: 'success',
-        text: `Successfully calculated & saved ${month} salary for ${currentEmployee.fullName} (Net: LKR ${formatLkr2(res.breakdown.net)})`,
+        text: 'Successful',
       });
     } else {
-      setStatusMsg({ type: 'error', text: res.error || 'Failed to save salary record.' });
+      triggerErrorFeedback(res.error || 'Failed to save salary record.');
     }
   };
 
@@ -311,7 +315,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       setUnlockModalOpen(false);
       setStatusMsg({
         type: 'success',
-        text: `Salary unlocked via Admin Approval ("${adminReason}"). You can now edit and re-save ${currentEmployee.fullName}'s salary.`,
+        text: 'Successful — Unlocked',
       });
     } else {
       setUnlockError(res.error || 'Admin authorization failed.');
@@ -330,23 +334,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
   return (
     <div className="space-y-5">
-      {statusMsg && (
-        <div
-          className={`p-4 rounded-2xl text-sm flex items-center gap-3 shadow-xs border ${
-            statusMsg.type === 'success'
-              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
-              : 'bg-rose-50 text-rose-900 border-rose-200'
-          }`}
-        >
-          {statusMsg.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-          )}
-          <span className="font-medium">{statusMsg.text}</span>
-        </div>
-      )}
-
       {/* Employee Command Hero & Selector Studio */}
       <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
@@ -473,35 +460,6 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           </div>
         </div>
       </div>
-
-      {isPaidLocked && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs sm:text-sm flex flex-wrap items-center justify-between gap-4 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <BadgeCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="font-extrabold text-emerald-950 flex items-center gap-2">
-                SALARY PAID &amp; LOCKED ({month})
-              </div>
-              <p className="text-xs text-emerald-800 mt-0.5">
-                Disbursement has been confirmed. Further updates are blocked unless an Admin unlocks this record.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setUnlockError(null);
-              setUnlockModalOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-xs cursor-pointer shrink-0"
-          >
-            <ShieldAlert className="w-4 h-4" />
-            Admin Approval to Unlock
-          </button>
-        </div>
-      )}
 
       {isAllowanceLocked && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-semibold flex items-center gap-3 shadow-xs">
@@ -1068,7 +1026,26 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 shrink-0">
+          {statusMsg && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border ${
+                statusMsg.type === 'success'
+                  ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300 whitespace-nowrap'
+                  : 'bg-rose-500/15 border-rose-400/40 text-rose-200 max-w-xs sm:max-w-sm'
+              }`}
+            >
+              {statusMsg.type === 'success' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              )}
+              <span>{statusMsg.text}</span>
+            </div>
+          )}
+
           {isPaidLocked ? (
             <>
               <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs font-bold whitespace-nowrap">
@@ -1092,7 +1069,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               type="button"
               onClick={handleSave}
               disabled={loading}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              className={`px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer whitespace-nowrap ${
+                shakeSaveBtn ? 'animate-shake ring-2 ring-rose-400 bg-rose-600 hover:bg-rose-600' : ''
+              }`}
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Save &amp; Update Salary

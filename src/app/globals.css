@@ -112,6 +112,25 @@ dialog::backdrop {
   container-type: inline-size;
 }
 
+/* Tactile error shake feedback for action buttons */
+@keyframes btn-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: btn-shake 0.38s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shake {
+    animation: none;
+  }
+}
+
 /* Persian Blue Brand Classes for backward-compatibility */
 .bg-persian-50 { background-color: #f0f4fa; }
 .bg-persian-100 { background-color: #d9e4f5; }
