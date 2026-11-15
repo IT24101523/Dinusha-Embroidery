@@ -3,6 +3,7 @@
 import { employeeRepository } from '@/modules/payroll/repositories/employee-repository';
 import { employeeFormSchema, EmployeeFormData, formatZodError } from '@/modules/payroll/domain/validation';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
+import { recordAuditLog } from '@/lib/audit';
 import { revalidatePath } from 'next/cache';
 
 export async function fetchEmployeesAction(): Promise<{ success: boolean; data?: EmployeeEntity[]; error?: string }> {
@@ -29,7 +30,14 @@ export async function saveEmployeeAction(
       saved = await employeeRepository.createEmployee(validated);
     }
 
+    await recordAuditLog({
+      module: 'Employees',
+      action: id ? 'UPDATE' : 'CREATE',
+      summary: `${id ? 'Updated' : 'Registered'} employee EPF #${saved.epfNo} - ${saved.fullName} (${saved.role}).`,
+    });
+
     revalidatePath('/payroll');
+    revalidatePath('/erp');
     revalidatePath('/');
     return { success: true, employee: saved };
   } catch (err) {
@@ -44,7 +52,13 @@ export async function deleteEmployeeAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await employeeRepository.deleteEmployeeWithReason(id, reason, notes);
+    await recordAuditLog({
+      module: 'Employees',
+      action: 'DELETE',
+      summary: `Removed employee ID ${id} (Reason: ${reason}).`,
+    });
     revalidatePath('/payroll');
+    revalidatePath('/erp');
     revalidatePath('/');
     return { success: true };
   } catch (err) {

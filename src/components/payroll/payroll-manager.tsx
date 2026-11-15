@@ -1,13 +1,21 @@
 'use client';
 
 import React, { useState, useMemo, useId } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { logoutFromErpAction } from '@/actions/auth';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { ProductionBundle } from '@/actions/production';
 import { QualityBundle } from '@/actions/quality';
+import { ProductionQuotationEntity } from '@/actions/quotations';
+import { ErpModuleId, ROLE_LABELS } from '@/lib/rbac';
+import type { UserRole } from '@/db/schema/users';
 import { FactoryDashboard } from '@/components/dashboard/factory-dashboard';
 import { NeedleManagement } from '@/components/needle/needle-management';
 import { ProductionManagement } from '@/components/production/production-management';
 import { QualityManagement } from '@/components/quality/quality-management';
+import { QuotationsManagement } from '@/components/quotations/quotations-management';
+import { AdminUserManagement } from '@/components/admin/admin-user-management';
 import { EmployeeCrud } from './employee-crud';
 import { SalaryCalculator } from './salary-calculator';
 import { PayslipPrintManager } from './payslip-print-manager';
@@ -32,28 +40,31 @@ import {
   ArrowLeft,
   Wallet,
   ChevronDown,
+  Globe,
+  LogOut,
+  FileText,
+  ShieldAlert,
 } from 'lucide-react';
+
+export interface PayrollManagerSessionInfo {
+  userId: string | null;
+  email: string | null;
+  userLabel: string | null;
+  role: UserRole | null;
+  allowedModules: ErpModuleId[];
+}
 
 interface PayrollManagerProps {
   initialEmployees: EmployeeEntity[];
   initialProductionBundle?: ProductionBundle;
   initialQualityBundle?: QualityBundle;
+  initialQuotations?: ProductionQuotationEntity[];
+  sessionInfo?: PayrollManagerSessionInfo;
 }
 
-type WorkspaceTabId =
-  | 'dashboard'
-  | 'employees'
-  | 'calculator'
-  | 'printManager'
-  | 'salarySheet'
-  | 'etf'
-  | 'epf'
-  | 'needle'
-  | 'production'
-  | 'quality'
-  | 'finance';
+type WorkspaceTabId = ErpModuleId;
 
-type NavSection = 'overview' | 'payroll' | 'upcoming';
+type NavSection = 'overview' | 'payroll' | 'administration' | 'upcoming';
 
 interface NavTabItem {
   id: WorkspaceTabId;
@@ -69,8 +80,21 @@ export function PayrollManager({
   initialEmployees,
   initialProductionBundle = { companies: [], machines: [], styles: [], plans: [] },
   initialQualityBundle = { checkers: [], blocks: [], deliveryTargets: [] },
+  initialQuotations = [],
+  sessionInfo,
 }: PayrollManagerProps) {
-  const [activeTab, setActiveTab] = useState<WorkspaceTabId>('dashboard');
+  const router = useRouter();
+  const allowedModules = useMemo<ErpModuleId[]>(
+    () =>
+      sessionInfo?.allowedModules && sessionInfo.allowedModules.length > 0
+        ? sessionInfo.allowedModules
+        : ['dashboard'],
+    [sessionInfo?.allowedModules]
+  );
+  const allowedSet = useMemo(() => new Set<ErpModuleId>(allowedModules), [allowedModules]);
+  const [activeTab, setActiveTab] = useState<WorkspaceTabId>(
+    allowedModules.includes('dashboard') ? 'dashboard' : allowedModules[0] || 'dashboard'
+  );
   const [payrollOpen, setPayrollOpen] = useState(false);
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
   const [productionBundle, setProductionBundle] =
@@ -163,6 +187,22 @@ export function PayrollManager({
         icon: ClipboardCheck,
       },
       {
+        id: 'quotations',
+        section: 'overview',
+        label: 'Production Quotations',
+        subtitle: 'Customer Quote Requests & Follow-up',
+        badge: String(initialQuotations.filter((q) => q.status === 'New').length || initialQuotations.length),
+        icon: FileText,
+      },
+      {
+        id: 'adminUsers',
+        section: 'administration',
+        label: 'User Access & Audit',
+        subtitle: 'RBAC, Password Reset & Audit Logs',
+        badge: 'Admin',
+        icon: ShieldAlert,
+      },
+      {
         id: 'finance',
         section: 'upcoming',
         label: 'Financial Manager',
@@ -172,11 +212,17 @@ export function PayrollManager({
         icon: Landmark,
       },
     ],
-    [employees.length]
+    [employees.length, initialQuotations]
   );
 
-  const activeNav = navItems.find((item) => item.id === activeTab) || navItems[0];
-  const isPayrollTabActive = navItems.some(
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => allowedSet.has(item.id)),
+    [navItems, allowedSet]
+  );
+
+  const activeNav =
+    visibleNavItems.find((item) => item.id === activeTab) || visibleNavItems[0] || navItems[0];
+  const isPayrollTabActive = visibleNavItems.some(
     (item) => item.section === 'payroll' && item.id === activeTab
   );
 
@@ -193,9 +239,11 @@ export function PayrollManager({
         <div className="p-3.5 group-hover/sidebar:p-5 space-y-5 group-hover/sidebar:space-y-6 overflow-y-auto overflow-x-hidden scrollbar-thin transition-all duration-200">
           {/* Brand Identity */}
           <div className="flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 pb-4 group-hover/sidebar:pb-5 border-b border-slate-800/90 transition-all duration-200">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-indigo-950/60 ring-1 ring-white/15 shrink-0">
-              D
-            </div>
+            <img
+              src="/images/dinusha-logo.jpg"
+              alt="Dinusha Embroidery"
+              className="w-11 h-11 rounded-full object-cover shadow-lg shadow-indigo-950/60 ring-1 ring-white/25 shrink-0"
+            />
             <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
               <div className="font-extrabold text-white tracking-tight text-sm truncate">
                 Dinusha Embroidery
@@ -218,10 +266,12 @@ export function PayrollManager({
               [
                 { key: 'overview', title: 'Overview' },
                 { key: 'payroll', title: 'Payroll' },
+                { key: 'administration', title: 'Administration' },
                 { key: 'upcoming', title: 'Upcoming Systems' },
               ] as const
             ).map((group) => {
-              const groupItems = navItems.filter((item) => item.section === group.key);
+              const groupItems = visibleNavItems.filter((item) => item.section === group.key);
+              if (groupItems.length === 0) return null;
 
               if (group.key === 'payroll') {
                 return (
@@ -410,11 +460,41 @@ export function PayrollManager({
               </span>
             </div>
             <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 transition-all duration-200 whitespace-nowrap">
-              <div className="text-xs font-bold text-slate-100">Dinusha Embroidery (Pvt) Ltd</div>
-              <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                Reg: 1G 014585 • Weliweriya
+              <div className="text-xs font-bold text-slate-100 truncate">
+                {sessionInfo?.userLabel || 'Dinusha Embroidery'}
+              </div>
+              <div className="text-[11px] font-mono text-indigo-300 mt-0.5 truncate">
+                {sessionInfo?.role ? ROLE_LABELS[sessionInfo.role] : 'ERP User'} • 1G 014585
               </div>
             </div>
+          </div>
+
+          <div className="mt-2.5 flex items-center gap-1.5">
+            <Link
+              href="/"
+              title="Back to Public Business Website"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white transition-colors"
+            >
+              <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
+                Website
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={async () => {
+                await logoutFromErpAction();
+                router.push('/');
+                router.refresh();
+              }}
+              title="Lock & Sign Out of ERP"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-rose-950/50 hover:bg-rose-900/70 border border-rose-800/40 text-[11px] font-bold text-rose-300 hover:text-white transition-colors cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5 shrink-0" />
+              <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
+                Sign Out
+              </span>
+            </button>
           </div>
         </div>
       </aside>
@@ -423,9 +503,11 @@ export function PayrollManager({
       <header className="lg:hidden bg-slate-950 text-white sticky top-0 z-40 shadow-md border-b border-slate-800 print:hidden">
         <div className="px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0">
-              D
-            </div>
+            <img
+              src="/images/dinusha-logo.jpg"
+              alt="Dinusha Embroidery"
+              className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-white/25 shrink-0"
+            />
             <div className="min-w-0">
               <div className="font-extrabold text-sm text-white truncate">Dinusha Embroidery</div>
               <div className="text-[10px] font-mono text-indigo-300 truncate">
@@ -444,7 +526,7 @@ export function PayrollManager({
           aria-label="Payroll workspace modules"
           className="tablist-scroller flex items-center gap-1.5 px-4 pb-2.5"
         >
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isSelected = activeTab === item.id;
             return (
@@ -588,7 +670,7 @@ export function PayrollManager({
             </div>
           )}
 
-          {activeTab === 'quality' && (
+          {activeTab === 'quality' && allowedSet.has('quality') && (
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-quality`}>
               <QualityManagement
                 employees={employees}
@@ -596,6 +678,18 @@ export function PayrollManager({
                 initialQualityBundle={qualityBundle}
                 onQualityBundleChange={setQualityBundle}
               />
+            </div>
+          )}
+
+          {activeTab === 'quotations' && allowedSet.has('quotations') && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-quotations`}>
+              <QuotationsManagement initialQuotations={initialQuotations} />
+            </div>
+          )}
+
+          {activeTab === 'adminUsers' && allowedSet.has('adminUsers') && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-adminUsers`}>
+              <AdminUserManagement currentUserId={sessionInfo?.userId || null} />
             </div>
           )}
 

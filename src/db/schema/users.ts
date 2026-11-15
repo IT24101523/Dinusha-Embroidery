@@ -1,6 +1,7 @@
 import { pgTable, uuid, varchar, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 
 export const userRoleEnum = pgEnum('user_role', [
+  'SUPER_ADMIN',
   'CEO',
   'FACTORY_MANAGER',
   'HR_NEEDLE_MANAGER',
@@ -16,6 +17,8 @@ export const userProfiles = pgTable('user_profiles', {
   fullName: varchar('full_name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   role: userRoleEnum('role').notNull().default('PRODUCTION_MANAGER'),
+  allowedModules: varchar('allowed_modules', { length: 64 }).array(),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

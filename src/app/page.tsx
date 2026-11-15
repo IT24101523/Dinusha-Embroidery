@@ -1,32 +1,25 @@
-import { fetchEmployeesAction } from '@/actions/employees';
-import { fetchProductionBundleAction } from '@/actions/production';
-import { fetchQualityBundleAction } from '@/actions/quality';
-import { PayrollManager } from '@/components/payroll/payroll-manager';
+import { checkErpSessionAction } from '@/actions/auth';
+import { BusinessHome } from '@/components/home/business-home';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
-  const [empRes, prodRes, qualRes] = await Promise.all([
-    fetchEmployeesAction(),
-    fetchProductionBundleAction(),
-    fetchQualityBundleAction(),
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ login?: string }>;
+}) {
+  const [session, resolvedParams] = await Promise.all([
+    checkErpSessionAction(),
+    searchParams,
   ]);
 
-  const employees = empRes.success && empRes.data ? empRes.data : [];
-  const productionBundle =
-    prodRes.success && prodRes.data
-      ? prodRes.data
-      : { companies: [], machines: [], styles: [], plans: [] };
-  const qualityBundle =
-    qualRes.success && qualRes.data
-      ? qualRes.data
-      : { checkers: [], blocks: [], deliveryTargets: [] };
+  const promptLogin = resolvedParams?.login === '1' && !session.authenticated;
 
   return (
-    <PayrollManager
-      initialEmployees={employees}
-      initialProductionBundle={productionBundle}
-      initialQualityBundle={qualityBundle}
+    <BusinessHome
+      isLoggedIn={session.authenticated}
+      userLabel={session.userLabel}
+      promptLogin={promptLogin}
     />
   );
 }

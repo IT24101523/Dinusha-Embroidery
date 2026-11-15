@@ -5,6 +5,7 @@ import { payrollRepository } from '@/modules/payroll/repositories/payroll-reposi
 import { monthlySalaryInputSchema, MonthlySalaryInputData, formatZodError } from '@/modules/payroll/domain/validation';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
+import { recordAuditLog } from '@/lib/audit';
 import { revalidatePath } from 'next/cache';
 
 export async function fetchSalaryRecordAction(
@@ -53,7 +54,14 @@ export async function saveMonthlySalaryAction(
     // Save to database
     await payrollRepository.savePayrollRecord(breakdown);
 
+    await recordAuditLog({
+      module: 'Payroll',
+      action: 'SAVE_SALARY',
+      summary: `Calculated & saved ${validated.month} salary for EPF #${employee.epfNo} - ${employee.fullName}.`,
+    });
+
     revalidatePath('/payroll');
+    revalidatePath('/erp');
     revalidatePath('/');
     return { success: true, breakdown };
   } catch (err) {
