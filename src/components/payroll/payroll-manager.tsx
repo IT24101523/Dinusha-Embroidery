@@ -2,8 +2,12 @@
 
 import React, { useState, useMemo, useId } from 'react';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
+import { ProductionBundle } from '@/actions/production';
+import { QualityBundle } from '@/actions/quality';
 import { FactoryDashboard } from '@/components/dashboard/factory-dashboard';
 import { NeedleManagement } from '@/components/needle/needle-management';
+import { ProductionManagement } from '@/components/production/production-management';
+import { QualityManagement } from '@/components/quality/quality-management';
 import { EmployeeCrud } from './employee-crud';
 import { SalaryCalculator } from './salary-calculator';
 import { PayslipPrintManager } from './payslip-print-manager';
@@ -32,6 +36,8 @@ import {
 
 interface PayrollManagerProps {
   initialEmployees: EmployeeEntity[];
+  initialProductionBundle?: ProductionBundle;
+  initialQualityBundle?: QualityBundle;
 }
 
 type WorkspaceTabId =
@@ -59,10 +65,18 @@ interface NavTabItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
+export function PayrollManager({
+  initialEmployees,
+  initialProductionBundle = { companies: [], machines: [], styles: [], plans: [] },
+  initialQualityBundle = { checkers: [], blocks: [], deliveryTargets: [] },
+}: PayrollManagerProps) {
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('dashboard');
   const [payrollOpen, setPayrollOpen] = useState(false);
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
+  const [productionBundle, setProductionBundle] =
+    useState<ProductionBundle>(initialProductionBundle);
+  const [qualityBundle, setQualityBundle] =
+    useState<QualityBundle>(initialQualityBundle);
   const [calculatorEmployeeId, setCalculatorEmployeeId] = useState<string | undefined>(
     initialEmployees[0]?.id
   );
@@ -134,20 +148,18 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
       },
       {
         id: 'production',
-        section: 'upcoming',
+        section: 'overview',
         label: 'Production Management',
-        subtitle: '13-Machine Matrix & Style Orders',
-        badge: 'Soon',
-        isUpcoming: true,
+        subtitle: 'Style Master, Machines & Gantt Matrix',
+        badge: 'Live',
         icon: Cpu,
       },
       {
         id: 'quality',
-        section: 'upcoming',
+        section: 'overview',
         label: 'Quality Checking',
-        subtitle: 'Defect Tracking & Target QC',
-        badge: 'Soon',
-        isUpcoming: true,
+        subtitle: 'Checking Plan, Live Floor & Checkers',
+        badge: 'Live',
         icon: ClipboardCheck,
       },
       {
@@ -496,6 +508,7 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-dashboard`}>
               <FactoryDashboard
                 employees={employees}
+                productionBundle={productionBundle}
                 onNavigate={(tab) => {
                   if (
                     tab === 'employees' ||
@@ -557,26 +570,43 @@ export function PayrollManager({ initialEmployees }: PayrollManagerProps) {
 
           {activeTab === 'needle' && (
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-needle`}>
-              <NeedleManagement employees={employees} />
+              <NeedleManagement
+                employees={employees}
+                machines={productionBundle.machines}
+                styles={productionBundle.styles}
+              />
             </div>
           )}
 
-          {(activeTab === 'production' ||
-            activeTab === 'quality' ||
-            activeTab === 'finance') && (
+          {activeTab === 'production' && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-production`}>
+              <ProductionManagement
+                employees={employees}
+                initialBundle={productionBundle}
+                onBundleChange={setProductionBundle}
+              />
+            </div>
+          )}
+
+          {activeTab === 'quality' && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-quality`}>
+              <QualityManagement
+                employees={employees}
+                productionBundle={productionBundle}
+                initialQualityBundle={qualityBundle}
+                onQualityBundleChange={setQualityBundle}
+              />
+            </div>
+          )}
+
+          {activeTab === 'finance' && (
             <div
               role="tabpanel"
               aria-labelledby={`${tabIdPrefix}-desktop-${activeTab}`}
               className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-8 max-w-2xl mx-auto text-center space-y-4"
             >
               <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
-                {activeTab === 'production' ? (
-                  <Cpu className="w-6 h-6" />
-                ) : activeTab === 'quality' ? (
-                  <ClipboardCheck className="w-6 h-6" />
-                ) : (
-                  <Landmark className="w-6 h-6" />
-                )}
+                <Landmark className="w-6 h-6" />
               </div>
               <div className="space-y-1.5">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
