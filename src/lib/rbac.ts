@@ -16,7 +16,7 @@ export type ErpModuleId =
   | 'finance';
 
 export interface ErpModuleMeta {
-  id: Exclude<ErpModuleId, 'finance'>;
+  id: ErpModuleId;
   label: string;
   category: 'Core' | 'Payroll' | 'Operations' | 'Administration';
   description: string;
@@ -28,6 +28,12 @@ export const ALL_ERP_MODULES: ErpModuleMeta[] = [
     label: 'Dashboard',
     category: 'Core',
     description: 'Factory Overview & Production Plan',
+  },
+  {
+    id: 'finance',
+    label: 'Financial Governance',
+    category: 'Core',
+    description: 'P&L, Machine Revenue, Payroll, COGS & OPEX',
   },
   {
     id: 'employees',
@@ -85,9 +91,9 @@ export const ALL_ERP_MODULES: ErpModuleMeta[] = [
   },
   {
     id: 'quotations',
-    label: 'Production Quotations',
-    category: 'Operations',
-    description: 'Customer Quote Requests & Follow-up',
+    label: 'Invoices & Quotations',
+    category: 'Core',
+    description: 'Zoho-Style Invoices, Quotes & Production Reconciliation',
   },
   {
     id: 'adminUsers',
@@ -110,6 +116,7 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
   SUPER_ADMIN: ALL_ERP_MODULES.map((m) => m.id),
   CEO: [
     'dashboard',
+    'finance',
     'employees',
     'calculator',
     'printManager',

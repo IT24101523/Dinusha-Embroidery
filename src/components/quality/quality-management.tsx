@@ -54,9 +54,10 @@ interface QualityManagementProps {
   productionBundle: ProductionBundle;
   initialQualityBundle: QualityBundle;
   onQualityBundleChange?: (bundle: QualityBundle) => void;
+  externalSubTab?: QualitySubTab;
 }
 
-type QualitySubTab = 'checkingEditor' | 'floorDisplay' | 'doneStyles' | 'checkerCrud';
+export type QualitySubTab = 'checkingEditor' | 'floorDisplay' | 'doneStyles' | 'checkerCrud';
 
 const SHIFT_HOURS = [
   { col: 1, value: '08:00', label: '08:00 AM', short: 'H1' },
@@ -132,9 +133,14 @@ export function QualityManagement({
   productionBundle,
   initialQualityBundle,
   onQualityBundleChange,
+  externalSubTab,
 }: QualityManagementProps) {
   const uid = useId();
-  const [subTab, setSubTab] = useState<QualitySubTab>('checkingEditor');
+  const [subTab, setSubTab] = useState<QualitySubTab>(externalSubTab || 'checkingEditor');
+
+  useEffect(() => {
+    if (externalSubTab) setSubTab(externalSubTab);
+  }, [externalSubTab]);
   const [isFloorFullscreen, setIsFloorFullscreen] = useState(false);
   const floorDisplayContainerRef = useRef<HTMLDivElement | null>(null);
 

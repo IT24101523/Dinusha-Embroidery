@@ -9,6 +9,7 @@ export interface ClientCompanyEntity {
   contactPerson: string;
   email: string;
   phone: string;
+  address?: string;
   colorScheme: string;
   isActive: boolean;
 }
@@ -100,12 +101,18 @@ export interface ProductionBundle {
 const COLOR_SCHEMES = ['indigo', 'amber', 'emerald', 'purple', 'rose', 'cyan', 'blue'];
 
 function mapCompany(row: Record<string, unknown>, idx = 0): ClientCompanyEntity {
+  const rawContact = String(row.contact_person || '');
+  const [contactPart, packedAddress] = rawContact.includes(' ||| ')
+    ? rawContact.split(' ||| ')
+    : [rawContact, ''];
+  const address = String(row.address || packedAddress || '').trim();
   return {
     id: String(row.id),
     name: String(row.name || ''),
-    contactPerson: String(row.contact_person || ''),
+    contactPerson: contactPart.trim(),
     email: String(row.email || ''),
     phone: String(row.phone || ''),
+    address,
     colorScheme: String(row.color_scheme || COLOR_SCHEMES[idx % COLOR_SCHEMES.length]),
     isActive: row.is_active !== false,
   };
@@ -299,6 +306,7 @@ export async function saveCompanyAction(
     contactPerson: string;
     email: string;
     phone: string;
+    address?: string;
     colorScheme?: string;
   },
   id?: string
@@ -308,6 +316,7 @@ export async function saveCompanyAction(
     const contactPerson = payload.contactPerson.trim();
     const email = payload.email.trim();
     const phone = payload.phone.trim();
+    const address = (payload.address || '').trim();
 
     if (name.length < 2 || name.length > 120) {
       return { success: false, error: 'Company name must be between 2 and 120 characters.' };
@@ -318,7 +327,7 @@ export async function saveCompanyAction(
 
     const rowData = {
       name,
-      contact_person: contactPerson,
+      contact_person: address ? `${contactPerson} ||| ${address}` : contactPerson,
       email,
       phone,
       color_scheme: payload.colorScheme || 'indigo',

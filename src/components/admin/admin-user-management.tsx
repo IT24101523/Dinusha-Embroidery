@@ -35,6 +35,7 @@ import {
 
 interface AdminUserManagementProps {
   currentUserId: string | null;
+  externalSubTab?: 'users' | 'audit';
 }
 
 const ROLE_OPTIONS: UserRole[] = [
@@ -46,8 +47,12 @@ const ROLE_OPTIONS: UserRole[] = [
   'QUALITY_MANAGER',
 ];
 
-export function AdminUserManagement({ currentUserId }: AdminUserManagementProps) {
-  const [subTab, setSubTab] = useState<'users' | 'audit'>('users');
+export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUserManagementProps) {
+  const [subTab, setSubTab] = useState<'users' | 'audit'>(externalSubTab || 'users');
+
+  useEffect(() => {
+    if (externalSubTab) setSubTab(externalSubTab);
+  }, [externalSubTab]);
   const [users, setUsers] = useState<ErpUserAccountEntity[]>([]);
   const [logs, setLogs] = useState<ErpAuditLogEntity[]>([]);
   const [loading, setLoading] = useState(true);

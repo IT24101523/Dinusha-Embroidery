@@ -97,7 +97,7 @@ const DEFAULT_NEEDLE_TYPES: NeedleTypeItem[] = [];
 
 const DEFAULT_RECORD_LOGS: NeedleRecordLog[] = [];
 
-type NeedleSubTab =
+export type NeedleSubTab =
   | 'inventory'
   | 'recordSheet'
   | 'cln'
@@ -109,14 +109,20 @@ interface NeedleManagementProps {
   employees: EmployeeEntity[];
   machines?: MachineEntity[];
   styles?: StyleMasterEntity[];
+  externalSubTab?: NeedleSubTab;
 }
 
 export function NeedleManagement({
   employees,
   machines = [],
   styles = [],
+  externalSubTab,
 }: NeedleManagementProps) {
-  const [subTab, setSubTab] = useState<NeedleSubTab>('inventory');
+  const [subTab, setSubTab] = useState<NeedleSubTab>(externalSubTab || 'inventory');
+
+  useEffect(() => {
+    if (externalSubTab) setSubTab(externalSubTab);
+  }, [externalSubTab]);
   const [needleTypes, setNeedleTypes] = useState<NeedleTypeItem[]>(() => {
     if (typeof window === 'undefined') return DEFAULT_NEEDLE_TYPES;
     try {

@@ -184,6 +184,7 @@ interface ProductionManagementProps {
   employees: EmployeeEntity[];
   initialBundle: ProductionBundle;
   onBundleChange?: (bundle: ProductionBundle) => void;
+  externalSubTab?: ProductionSubTab;
 }
 
 function createEmptyPart(defaultNeedle = ''): StylePartItem {
@@ -200,6 +201,7 @@ export function ProductionManagement({
   employees,
   initialBundle,
   onBundleChange,
+  externalSubTab,
 }: ProductionManagementProps) {
   const uid = useId();
   const todayStr = useMemo(
@@ -209,7 +211,11 @@ export function ProductionManagement({
       }).format(new Date()),
     []
   );
-  const [subTab, setSubTab] = useState<ProductionSubTab>('planEditor');
+  const [subTab, setSubTab] = useState<ProductionSubTab>(externalSubTab || 'planEditor');
+
+  useEffect(() => {
+    if (externalSubTab) setSubTab(externalSubTab);
+  }, [externalSubTab]);
 
   // Master Data & Production Plan State
   const [companies, setCompanies] = useState<ClientCompanyEntity[]>(initialBundle.companies);
@@ -411,6 +417,7 @@ export function ProductionManagement({
   const [compContact, setCompContact] = useState('');
   const [compEmail, setCompEmail] = useState('');
   const [compPhone, setCompPhone] = useState('');
+  const [compAddress, setCompAddress] = useState('');
   const [compColor, setCompColor] = useState('indigo');
 
   const resetCompanyForm = () => {
@@ -419,6 +426,7 @@ export function ProductionManagement({
     setCompContact('');
     setCompEmail('');
     setCompPhone('');
+    setCompAddress('');
     setCompColor('indigo');
   };
 
@@ -428,6 +436,7 @@ export function ProductionManagement({
     setCompContact(c.contactPerson);
     setCompEmail(c.email);
     setCompPhone(c.phone);
+    setCompAddress(c.address || '');
     setCompColor(c.colorScheme || 'indigo');
   };
 
@@ -462,6 +471,7 @@ export function ProductionManagement({
         contactPerson: contactTrim,
         email: emailTrim,
         phone: phoneTrim,
+        address: compAddress.trim(),
         colorScheme: compColor,
       },
       editingCompanyId || undefined
@@ -6073,6 +6083,25 @@ export function ProductionManagement({
 
               <div>
                 <label
+                  htmlFor={`${uid}-comp-address`}
+                  className="block text-xs font-bold text-slate-700 mb-1"
+                >
+                  Billing / Company Address *
+                </label>
+                <textarea
+                  id={`${uid}-comp-address`}
+                  name="compAddress"
+                  rows={2}
+                  value={compAddress}
+                  onChange={(e) => setCompAddress(e.target.value)}
+                  placeholder="No. 120, Industrial Zone, Biyagama, Sri Lanka"
+                  required
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm focus:border-persian-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label
                   htmlFor={`${uid}-comp-color`}
                   className="block text-xs font-bold text-slate-700 mb-1"
                 >
@@ -6133,6 +6162,7 @@ export function ProductionManagement({
                   <tr>
                     <th className="p-4">Company Name</th>
                     <th className="p-4">Contact Person</th>
+                    <th className="p-4">Billing Address</th>
                     <th className="p-4">Email</th>
                     <th className="p-4">Phone</th>
                     <th className="p-4">Styles</th>
@@ -6142,7 +6172,7 @@ export function ProductionManagement({
                 <tbody className="divide-y divide-slate-100">
                   {companies.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-xs text-slate-400">
+                      <td colSpan={7} className="p-8 text-center text-xs text-slate-400">
                         No client companies registered yet.
                       </td>
                     </tr>
@@ -6159,6 +6189,7 @@ export function ProductionManagement({
                             {c.name}
                           </th>
                           <td className="p-4 text-slate-700">{c.contactPerson}</td>
+                          <td className="p-4 text-slate-600 text-xs">{c.address || '-'}</td>
                           <td className="p-4 text-blue-600">{c.email || '-'}</td>
                           <td className="p-4 text-slate-600 font-mono">{c.phone || '-'}</td>
                           <td className="p-4 font-mono text-xs font-bold text-slate-500">

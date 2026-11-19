@@ -11,11 +11,21 @@ import { ProductionQuotationEntity } from '@/actions/quotations';
 import { ErpModuleId, ROLE_LABELS } from '@/lib/rbac';
 import type { UserRole } from '@/db/schema/users';
 import { FactoryDashboard } from '@/components/dashboard/factory-dashboard';
-import { NeedleManagement } from '@/components/needle/needle-management';
-import { ProductionManagement } from '@/components/production/production-management';
-import { QualityManagement } from '@/components/quality/quality-management';
-import { QuotationsManagement } from '@/components/quotations/quotations-management';
+import { NeedleManagement, type NeedleSubTab } from '@/components/needle/needle-management';
+import {
+  ProductionManagement,
+  type ProductionSubTab,
+} from '@/components/production/production-management';
+import { QualityManagement, type QualitySubTab } from '@/components/quality/quality-management';
+import {
+  QuotationsManagement,
+  type BillingWorkspaceTab,
+} from '@/components/quotations/quotations-management';
 import { AdminUserManagement } from '@/components/admin/admin-user-management';
+import {
+  FinancialManagement,
+  type FinanceSubTab,
+} from '@/components/finance/financial-management';
 import { EmployeeCrud } from './employee-crud';
 import { SalaryCalculator } from './salary-calculator';
 import { PayslipPrintManager } from './payslip-print-manager';
@@ -44,6 +54,8 @@ import {
   LogOut,
   FileText,
   ShieldAlert,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 
 export interface PayrollManagerSessionInfo {
@@ -95,7 +107,19 @@ export function PayrollManager({
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>(
     allowedModules.includes('dashboard') ? 'dashboard' : allowedModules[0] || 'dashboard'
   );
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [payrollOpen, setPayrollOpen] = useState(false);
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
+  const [needleSubTab, setNeedleSubTab] = useState<NeedleSubTab>('inventory');
+  const [productionSubTab, setProductionSubTab] = useState<ProductionSubTab>('planEditor');
+  const [qualitySubTab, setQualitySubTab] = useState<QualitySubTab>('checkingEditor');
+  const [billingSubTab, setBillingSubTab] = useState<BillingWorkspaceTab>('invoices');
+  const [financeSubTab, setFinanceSubTab] = useState<FinanceSubTab>('dashboard');
+  const [adminSubTab, setAdminSubTab] = useState<'users' | 'audit'>('users');
+
+  const toggleMenu = (key: string) => {
+    setOpenMenus((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
   const [productionBundle, setProductionBundle] =
     useState<ProductionBundle>(initialProductionBundle);
@@ -189,8 +213,8 @@ export function PayrollManager({
       {
         id: 'quotations',
         section: 'overview',
-        label: 'Production Quotations',
-        subtitle: 'Customer Quote Requests & Follow-up',
+        label: 'Invoices & Quotations',
+        subtitle: 'Zoho-Style Billing, Quotes & Style Reconciliation',
         badge: String(initialQuotations.filter((q) => q.status === 'New').length || initialQuotations.length),
         icon: FileText,
       },
@@ -204,11 +228,9 @@ export function PayrollManager({
       },
       {
         id: 'finance',
-        section: 'upcoming',
-        label: 'Financial Manager',
-        subtitle: 'Cashflow, Expenses & Accounts',
-        badge: 'Soon',
-        isUpcoming: true,
+        section: 'overview',
+        label: 'Financial Governance',
+        subtitle: 'P&L, Revenue, Payroll, COGS & OPEX',
         icon: Landmark,
       },
     ],
@@ -234,137 +256,572 @@ export function PayrollManager({
 
   return (
     <div className="min-h-screen app-mesh-bg text-slate-900 flex flex-col lg:flex-row font-sans print:block print:min-h-0 print:bg-white">
-      {/* Desktop Enterprise Sidebar (Icon-only by default, expands on hover) */}
-      <aside className="hidden lg:flex lg:w-[76px] hover:lg:w-72 shrink-0 bg-slate-950 text-white flex-col justify-between border-r border-slate-800/80 sticky top-0 h-screen print:hidden transition-all duration-200 ease-out group/sidebar overflow-hidden z-30">
-        <div className="p-3.5 group-hover/sidebar:p-5 space-y-5 group-hover/sidebar:space-y-6 overflow-y-auto overflow-x-hidden scrollbar-thin transition-all duration-200">
-          {/* Brand Identity */}
-          <div className="flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 pb-4 group-hover/sidebar:pb-5 border-b border-slate-800/90 transition-all duration-200">
-            <img
-              src="/images/dinusha-logo.jpg"
-              alt="Dinusha Embroidery"
-              className="w-11 h-11 rounded-full object-cover shadow-lg shadow-indigo-950/60 ring-1 ring-white/25 shrink-0"
-            />
-            <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
-              <div className="font-extrabold text-white tracking-tight text-sm truncate">
-                Dinusha Embroidery
-              </div>
-              <div className="text-[11px] font-medium text-indigo-300/90 flex items-center gap-1.5 mt-0.5">
-                <Sparkles className="w-3 h-3 shrink-0" />
-                <span>Enterprise Payroll ERP</span>
-              </div>
+      {/* Desktop Enterprise Sidebar (Manual Toggle Button — No Auto Hover Slide) */}
+      <aside
+        className={`hidden lg:flex ${
+          sidebarExpanded ? 'lg:w-72' : 'lg:w-[76px]'
+        } shrink-0 bg-slate-950 text-white flex-col justify-between border-r border-slate-800/80 sticky top-0 h-screen print:hidden transition-all duration-200 ease-out overflow-hidden z-30`}
+      >
+        <div
+          className={`${
+            sidebarExpanded ? 'p-4 space-y-5' : 'p-3 space-y-4'
+          } overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden transition-all duration-200`}
+        >
+          {/* Brand Identity + Manual Slide Toggle Button */}
+          <div
+            className={`flex items-center ${
+              sidebarExpanded ? 'justify-between gap-2.5 pb-4' : 'flex-col justify-center gap-2.5 pb-3'
+            } border-b border-slate-800/90 transition-all duration-200`}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <img
+                src="/images/dinusha-logo.jpg"
+                alt="Dinusha Embroidery"
+                className="w-10 h-10 rounded-full object-cover shadow-lg shadow-indigo-950/60 ring-1 ring-white/25 shrink-0"
+              />
+              {sidebarExpanded && (
+                <div className="min-w-0 whitespace-nowrap">
+                  <div className="font-extrabold text-white tracking-tight text-sm truncate">
+                    Dinusha Embroidery
+                  </div>
+                  <div className="text-[11px] font-medium text-indigo-300/90 flex items-center gap-1.5 mt-0.5">
+                    <Sparkles className="w-3 h-3 shrink-0" />
+                    <span>Enterprise ERP</span>
+                  </div>
+                </div>
+              )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setSidebarExpanded((prev) => !prev)}
+              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+              title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors cursor-pointer shrink-0"
+            >
+              {sidebarExpanded ? (
+                <PanelLeftClose className="w-4 h-4" />
+              ) : (
+                <PanelLeftOpen className="w-4 h-4" />
+              )}
+            </button>
           </div>
 
-          {/* Navigation Tablist (Desktop Vertical) */}
+          {/* Navigation Tablist (Desktop Vertical — All Collapsible Dropdowns like Payroll) */}
           <div
             role="tablist"
             aria-label="ERP workspace modules"
             aria-orientation="vertical"
-            className="space-y-4"
+            className="space-y-2.5"
           >
-            {(
-              [
-                { key: 'overview', title: 'Overview' },
-                { key: 'payroll', title: 'Payroll' },
-                { key: 'administration', title: 'Administration' },
-                { key: 'upcoming', title: 'Upcoming Systems' },
-              ] as const
-            ).map((group) => {
-              const groupItems = visibleNavItems.filter((item) => item.section === group.key);
-              if (groupItems.length === 0) return null;
+            {[
+              {
+                key: 'dashboard',
+                allowed: allowedSet.has('dashboard'),
+                title: 'Dashboard',
+                subtitle: 'Factory Overview & Live Floor',
+                icon: LayoutDashboard,
+                isActive: activeTab === 'dashboard',
+                subItems: [
+                  {
+                    id: 'dash-overview',
+                    label: 'Factory Overview',
+                    badge: 'Live',
+                    icon: LayoutDashboard,
+                    isSelected: activeTab === 'dashboard',
+                    onSelect: () => setActiveTab('dashboard'),
+                  },
+                ],
+              },
+              {
+                key: 'payroll',
+                allowed: visibleNavItems.some((item) => item.section === 'payroll'),
+                title: 'Payroll',
+                subtitle: 'Employees, Salary, Payslips, EPF/ETF',
+                icon: Wallet,
+                isActive: isPayrollTabActive,
+                subItems: visibleNavItems
+                  .filter((item) => item.section === 'payroll')
+                  .map((item) => ({
+                    id: item.id,
+                    label: item.label,
+                    badge: item.badge,
+                    icon: item.icon,
+                    isSelected: activeTab === item.id,
+                    onSelect: () => setActiveTab(item.id),
+                  })),
+              },
+              {
+                key: 'needle',
+                allowed: allowedSet.has('needle'),
+                title: 'Needle Management',
+                subtitle: 'Inventory, Logs, CLN & Broken Needles',
+                icon: Pin,
+                isActive: activeTab === 'needle',
+                subItems: [
+                  {
+                    id: 'needle-inventory',
+                    label: 'Needle Inventory',
+                    icon: Pin,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'inventory',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('inventory');
+                    },
+                  },
+                  {
+                    id: 'needle-recordSheet',
+                    label: 'Record Sheet',
+                    icon: Table2,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'recordSheet',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('recordSheet');
+                    },
+                  },
+                  {
+                    id: 'needle-cln',
+                    label: 'CLN Checklist',
+                    icon: ClipboardCheck,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'cln',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('cln');
+                    },
+                  },
+                  {
+                    id: 'needle-switchNeedle',
+                    label: 'Switch Needle',
+                    icon: Sparkles,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'switchNeedle',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('switchNeedle');
+                    },
+                  },
+                  {
+                    id: 'needle-recordBroken',
+                    label: 'Record Broken Needle',
+                    icon: ShieldAlert,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'recordBroken',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('recordBroken');
+                    },
+                  },
+                  {
+                    id: 'needle-stockManage',
+                    label: 'Manage Needle Stock',
+                    icon: Building2,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'stockManage',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('stockManage');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'production',
+                allowed: allowedSet.has('production'),
+                title: 'Production Management',
+                subtitle: 'Plan Matrix, Styles, Machines & Customers',
+                icon: Cpu,
+                isActive: activeTab === 'production',
+                subItems: [
+                  {
+                    id: 'prod-planEditor',
+                    label: 'Production Plan Matrix',
+                    icon: Cpu,
+                    isSelected: activeTab === 'production' && productionSubTab === 'planEditor',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('planEditor');
+                    },
+                  },
+                  {
+                    id: 'prod-floorDisplay',
+                    label: 'Live Floor Display',
+                    icon: LayoutDashboard,
+                    isSelected: activeTab === 'production' && productionSubTab === 'floorDisplay',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('floorDisplay');
+                    },
+                  },
+                  {
+                    id: 'prod-styleCrud',
+                    label: 'Style Master',
+                    icon: FileText,
+                    isSelected: activeTab === 'production' && productionSubTab === 'styleCrud',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('styleCrud');
+                    },
+                  },
+                  {
+                    id: 'prod-doneStyles',
+                    label: 'Completed Styles',
+                    icon: FileCheck2,
+                    isSelected: activeTab === 'production' && productionSubTab === 'doneStyles',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('doneStyles');
+                    },
+                  },
+                  {
+                    id: 'prod-strikeOff',
+                    label: 'Strike-Off & Samples',
+                    icon: Sparkles,
+                    isSelected: activeTab === 'production' && productionSubTab === 'strikeOff',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('strikeOff');
+                    },
+                  },
+                  {
+                    id: 'prod-companyCrud',
+                    label: 'Partner Companies (Customers)',
+                    badge: String(productionBundle.companies.length),
+                    icon: Building2,
+                    isSelected: activeTab === 'production' && productionSubTab === 'companyCrud',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('companyCrud');
+                    },
+                  },
+                  {
+                    id: 'prod-machineCrud',
+                    label: 'Machines & Operators',
+                    badge: String(productionBundle.machines.length),
+                    icon: Cpu,
+                    isSelected: activeTab === 'production' && productionSubTab === 'machineCrud',
+                    onSelect: () => {
+                      setActiveTab('production');
+                      setProductionSubTab('machineCrud');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'quality',
+                allowed: allowedSet.has('quality'),
+                title: 'Quality Checking',
+                subtitle: 'Checking Plan, Floor & Checkers',
+                icon: ClipboardCheck,
+                isActive: activeTab === 'quality',
+                subItems: [
+                  {
+                    id: 'qual-checkingEditor',
+                    label: 'Checking Plan Matrix',
+                    icon: ClipboardCheck,
+                    isSelected: activeTab === 'quality' && qualitySubTab === 'checkingEditor',
+                    onSelect: () => {
+                      setActiveTab('quality');
+                      setQualitySubTab('checkingEditor');
+                    },
+                  },
+                  {
+                    id: 'qual-floorDisplay',
+                    label: 'Live Quality Floor',
+                    icon: LayoutDashboard,
+                    isSelected: activeTab === 'quality' && qualitySubTab === 'floorDisplay',
+                    onSelect: () => {
+                      setActiveTab('quality');
+                      setQualitySubTab('floorDisplay');
+                    },
+                  },
+                  {
+                    id: 'qual-doneStyles',
+                    label: 'Completed Styles',
+                    icon: FileCheck2,
+                    isSelected: activeTab === 'quality' && qualitySubTab === 'doneStyles',
+                    onSelect: () => {
+                      setActiveTab('quality');
+                      setQualitySubTab('doneStyles');
+                    },
+                  },
+                  {
+                    id: 'qual-checkerCrud',
+                    label: 'Quality Checkers',
+                    icon: Users,
+                    isSelected: activeTab === 'quality' && qualitySubTab === 'checkerCrud',
+                    onSelect: () => {
+                      setActiveTab('quality');
+                      setQualitySubTab('checkerCrud');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'quotations',
+                allowed: allowedSet.has('quotations'),
+                title: 'Invoices & Quotations',
+                subtitle: 'Invoices, Tax Invoices, Quotes & Items',
+                icon: FileText,
+                isActive: activeTab === 'quotations',
+                subItems: [
+                  {
+                    id: 'bill-invoices',
+                    label: 'All Invoices',
+                    icon: FileCheck2,
+                    isSelected: activeTab === 'quotations' && billingSubTab === 'invoices',
+                    onSelect: () => {
+                      setActiveTab('quotations');
+                      setBillingSubTab('invoices');
+                    },
+                  },
+                  {
+                    id: 'bill-quotes',
+                    label: 'All Quotes (QT)',
+                    icon: FileText,
+                    isSelected: activeTab === 'quotations' && billingSubTab === 'quotes',
+                    onSelect: () => {
+                      setActiveTab('quotations');
+                      setBillingSubTab('quotes');
+                    },
+                  },
+                  {
+                    id: 'bill-customers',
+                    label: 'Customers',
+                    icon: Users,
+                    isSelected: activeTab === 'quotations' && billingSubTab === 'customers',
+                    onSelect: () => {
+                      setActiveTab('quotations');
+                      setBillingSubTab('customers');
+                    },
+                  },
+                  {
+                    id: 'bill-items',
+                    label: 'Items & Styles',
+                    icon: Table2,
+                    isSelected: activeTab === 'quotations' && billingSubTab === 'items',
+                    onSelect: () => {
+                      setActiveTab('quotations');
+                      setBillingSubTab('items');
+                    },
+                  },
+                  {
+                    id: 'bill-webInquiries',
+                    label: 'Website Quote Requests',
+                    badge: String(initialQuotations.length),
+                    icon: Globe,
+                    isSelected: activeTab === 'quotations' && billingSubTab === 'webInquiries',
+                    onSelect: () => {
+                      setActiveTab('quotations');
+                      setBillingSubTab('webInquiries');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'finance',
+                allowed: allowedSet.has('finance'),
+                title: 'Financial Governance',
+                subtitle: 'P&L, Revenue, Salaries, COGS & OPEX',
+                icon: Landmark,
+                isActive: activeTab === 'finance',
+                subItems: [
+                  {
+                    id: 'fin-dashboard',
+                    label: 'P&L Dashboard',
+                    icon: Landmark,
+                    isSelected: activeTab === 'finance' && financeSubTab === 'dashboard',
+                    onSelect: () => {
+                      setActiveTab('finance');
+                      setFinanceSubTab('dashboard');
+                    },
+                  },
+                  {
+                    id: 'fin-revenue',
+                    label: 'Machine Revenue',
+                    icon: Cpu,
+                    isSelected: activeTab === 'finance' && financeSubTab === 'revenue',
+                    onSelect: () => {
+                      setActiveTab('finance');
+                      setFinanceSubTab('revenue');
+                    },
+                  },
+                  {
+                    id: 'fin-salary',
+                    label: 'Staff Salaries (Payroll)',
+                    icon: Users,
+                    isSelected: activeTab === 'finance' && financeSubTab === 'salary',
+                    onSelect: () => {
+                      setActiveTab('finance');
+                      setFinanceSubTab('salary');
+                    },
+                  },
+                  {
+                    id: 'fin-cogs',
+                    label: 'Material Cost (COGS)',
+                    icon: Building2,
+                    isSelected: activeTab === 'finance' && financeSubTab === 'cogs',
+                    onSelect: () => {
+                      setActiveTab('finance');
+                      setFinanceSubTab('cogs');
+                    },
+                  },
+                  {
+                    id: 'fin-expense',
+                    label: 'OPEX & Bills Ledger',
+                    icon: FileText,
+                    isSelected: activeTab === 'finance' && financeSubTab === 'expense',
+                    onSelect: () => {
+                      setActiveTab('finance');
+                      setFinanceSubTab('expense');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'adminUsers',
+                allowed: allowedSet.has('adminUsers'),
+                title: 'User Access & Audit',
+                subtitle: 'RBAC, Password Reset & Audit Logs',
+                icon: ShieldAlert,
+                isActive: activeTab === 'adminUsers',
+                subItems: [
+                  {
+                    id: 'adm-users',
+                    label: 'User Accounts & RBAC',
+                    badge: 'Admin',
+                    icon: Users,
+                    isSelected: activeTab === 'adminUsers' && adminSubTab === 'users',
+                    onSelect: () => {
+                      setActiveTab('adminUsers');
+                      setAdminSubTab('users');
+                    },
+                  },
+                  {
+                    id: 'adm-audit',
+                    label: 'System Audit Logs',
+                    icon: ShieldCheck,
+                    isSelected: activeTab === 'adminUsers' && adminSubTab === 'audit',
+                    onSelect: () => {
+                      setActiveTab('adminUsers');
+                      setAdminSubTab('audit');
+                    },
+                  },
+                ],
+              },
+            ]
+              .filter((group) => group.allowed && group.subItems.length > 0)
+              .map((group) => {
+                const GroupIcon = group.icon;
+                const isOpen =
+                  group.key === 'payroll'
+                    ? payrollOpen || group.isActive
+                    : Boolean(openMenus[group.key] ?? group.isActive);
 
-              if (group.key === 'payroll') {
+                const handleToggle = () => {
+                  if (!sidebarExpanded) {
+                    setSidebarExpanded(true);
+                    if (group.key === 'payroll') setPayrollOpen(true);
+                    else setOpenMenus((prev) => ({ ...prev, [group.key]: true }));
+                    group.subItems[0]?.onSelect();
+                    return;
+                  }
+                  if (group.key === 'payroll') {
+                    setPayrollOpen((prev) => !prev);
+                  } else {
+                    toggleMenu(group.key);
+                  }
+                };
+
                 return (
-                  <div key={group.key} className="space-y-1.5">
-                    <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap transition-all duration-200">
-                      Payroll
-                    </div>
-
-                    {/* Collapsible Payroll Dropdown Trigger */}
+                  <div key={group.key} className="space-y-1">
+                    {/* Collapsible Module Dropdown Trigger */}
                     <button
                       type="button"
-                      aria-expanded={payrollOpen}
-                      title="Payroll"
-                      onClick={() => setPayrollOpen((prev) => !prev)}
-                      className={`relative w-full text-left px-2.5 group-hover/sidebar:px-3.5 py-2 rounded-xl transition-all duration-200 flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 group cursor-pointer ${
-                        isPayrollTabActive
+                      aria-expanded={sidebarExpanded && isOpen}
+                      title={group.title}
+                      onClick={handleToggle}
+                      className={`relative w-full text-left ${
+                        sidebarExpanded
+                          ? 'px-3.5 py-2 justify-start gap-3'
+                          : 'px-2.5 py-2 justify-center gap-0'
+                      } rounded-xl transition-all duration-200 flex items-center group cursor-pointer ${
+                        group.isActive
                           ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm'
                           : 'text-slate-300 hover:bg-slate-900 hover:text-white'
                       }`}
                     >
                       <div
-                        className={`w-9 h-9 group-hover/sidebar:w-8 group-hover/sidebar:h-8 rounded-lg flex items-center justify-center shrink-0 transition ${
-                          isPayrollTabActive
+                        className={`${
+                          sidebarExpanded ? 'w-8 h-8' : 'w-9 h-9'
+                        } rounded-lg flex items-center justify-center shrink-0 transition ${
+                          group.isActive
                             ? 'bg-indigo-500 text-white shadow-sm'
                             : 'bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200'
                         }`}
                       >
-                        <Wallet className="w-4 h-4" />
+                        <GroupIcon className="w-4 h-4" />
                       </div>
-                      <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:flex-1 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold truncate">Payroll</span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700/80">
-                              6
-                            </span>
-                            <ChevronDown
-                              className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                                payrollOpen ? 'rotate-180 text-indigo-300' : ''
-                              }`}
-                            />
+                      {sidebarExpanded && (
+                        <div className="flex-1 min-w-0 whitespace-nowrap">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold truncate">{group.title}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700/80">
+                                {group.subItems.length}
+                              </span>
+                              <ChevronDown
+                                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                                  isOpen ? 'rotate-180 text-indigo-300' : ''
+                                }`}
+                              />
+                            </div>
                           </div>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {group.subtitle}
+                          </p>
                         </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          Employees, Salary, Payslips, EPF/ETF
-                        </p>
-                      </div>
+                      )}
                     </button>
 
-                    {/* Payroll Sub-Items (only visible when Payroll dropdown is open) */}
-                    {payrollOpen && (
-                      <div className="space-y-1 group-hover/sidebar:pl-2.5 group-hover/sidebar:border-l group-hover/sidebar:border-slate-800 group-hover/sidebar:ml-3.5 transition-all">
-                        {groupItems.map((item) => {
-                          const Icon = item.icon;
-                          const isSelected = activeTab === item.id;
+                    {/* Indented Sub-Items List (Only rendered when sidebar is expanded) */}
+                    {sidebarExpanded && isOpen && (
+                      <div className="space-y-1 pl-2.5 border-l border-slate-800 ml-3.5 transition-all">
+                        {group.subItems.map((sub) => {
+                          const SubIcon = sub.icon;
                           return (
                             <button
-                              key={item.id}
+                              key={sub.id}
                               type="button"
                               role="tab"
-                              id={`${tabIdPrefix}-desktop-${item.id}`}
-                              aria-selected={isSelected}
-                              title={item.label}
-                              onClick={() => setActiveTab(item.id)}
-                              className={`relative w-full text-left px-2.5 group-hover/sidebar:px-3 py-1.5 rounded-xl transition-all duration-200 flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-2.5 group cursor-pointer ${
-                                isSelected
+                              aria-selected={sub.isSelected}
+                              title={sub.label}
+                              onClick={sub.onSelect}
+                              className={`relative w-full text-left px-3 py-1.5 rounded-xl transition-all duration-200 flex items-center justify-start gap-2.5 group cursor-pointer ${
+                                sub.isSelected
                                   ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm after:content-[""] after:absolute after:left-0 after:top-1.5 after:bottom-1.5 after:w-1 after:rounded-r-full after:bg-indigo-400'
                                   : 'text-slate-300 hover:bg-slate-900 hover:text-white'
                               }`}
                             >
                               <div
-                                className={`w-8 h-8 group-hover/sidebar:w-7 group-hover/sidebar:h-7 rounded-lg flex items-center justify-center shrink-0 transition ${
-                                  isSelected
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition ${
+                                  sub.isSelected
                                     ? 'bg-indigo-500 text-white shadow-sm'
                                     : 'bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200'
                                 }`}
                               >
-                                <Icon className="w-3.5 h-3.5" />
+                                <SubIcon className="w-3.5 h-3.5" />
                               </div>
-                              <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:flex-1 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
+                              <div className="flex-1 min-w-0 whitespace-nowrap">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-[11px] font-bold truncate">
-                                    {item.label}
+                                    {sub.label}
                                   </span>
-                                  {item.badge && (
+                                  {'badge' in sub && sub.badge && (
                                     <span
                                       className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold shrink-0 ${
-                                        isSelected
+                                        sub.isSelected
                                           ? 'bg-indigo-400/25 text-indigo-100 border border-indigo-400/40'
                                           : 'bg-slate-800 text-slate-400 border border-slate-700/80'
                                       }`}
                                     >
-                                      {item.badge}
+                                      {sub.badge}
                                     </span>
                                   )}
                                 </div>
@@ -376,109 +833,61 @@ export function PayrollManager({
                     )}
                   </div>
                 );
-              }
-
-              return (
-                <div key={group.key} className="space-y-1.5">
-                  <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap transition-all duration-200">
-                    {group.title}
-                  </div>
-                  {groupItems.map((item) => {
-                    const Icon = item.icon;
-                    const isSelected = activeTab === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="tab"
-                        id={`${tabIdPrefix}-desktop-${item.id}`}
-                        aria-selected={isSelected}
-                        title={item.label}
-                        onClick={() => setActiveTab(item.id)}
-                        className={`relative w-full text-left px-2.5 group-hover/sidebar:px-3.5 py-2 rounded-xl transition-all duration-200 flex items-center justify-center group-hover/sidebar:justify-start gap-0 group-hover/sidebar:gap-3 group cursor-pointer ${
-                          isSelected
-                            ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm after:content-[""] after:absolute after:left-0 after:top-2 after:bottom-2 after:w-1 after:rounded-r-full after:bg-indigo-400'
-                            : item.isUpcoming
-                            ? 'text-slate-400 hover:bg-slate-900/80 hover:text-slate-200'
-                            : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                        }`}
-                      >
-                        <div
-                          className={`w-9 h-9 group-hover/sidebar:w-8 group-hover/sidebar:h-8 rounded-lg flex items-center justify-center shrink-0 transition ${
-                            isSelected
-                              ? 'bg-indigo-500 text-white shadow-sm'
-                              : item.id === 'needle'
-                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 group-hover:bg-amber-500/25'
-                              : 'bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200'
-                          }`}
-                        >
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 group-hover/sidebar:flex-1 group-hover/sidebar:min-w-0 transition-all duration-200 whitespace-nowrap">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold truncate">{item.label}</span>
-                            {item.badge && (
-                              <span
-                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0 ${
-                                  isSelected
-                                    ? 'bg-indigo-400/25 text-indigo-100 border border-indigo-400/40'
-                                    : item.badge === 'Next'
-                                    ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
-                                    : 'bg-slate-800 text-slate-400 border border-slate-700/80'
-                                }`}
-                              >
-                                {item.badge}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                            {item.subtitle}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
+              })}
           </div>
         </div>
 
         {/* Factory Compliance & Reg Footer */}
-        <div className="p-3 group-hover/sidebar:p-4 border-t border-slate-800/90 bg-slate-950/80 transition-all duration-200">
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5 group-hover/sidebar:p-3.5 space-y-0 group-hover/sidebar:space-y-2 transition-all duration-200">
-            <div className="flex items-center justify-center group-hover/sidebar:justify-between">
+        <div
+          className={`${
+            sidebarExpanded ? 'p-4' : 'p-2.5'
+          } border-t border-slate-800/90 bg-slate-950/80 transition-all duration-200`}
+        >
+          <div
+            className={`rounded-xl bg-slate-900/90 border border-slate-800 ${
+              sidebarExpanded ? 'p-3.5 space-y-2' : 'p-2.5'
+            } transition-all duration-200`}
+          >
+            <div
+              className={`flex items-center ${
+                sidebarExpanded ? 'justify-between' : 'justify-center'
+              }`}
+            >
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Building2 className="w-4 h-4 group-hover/sidebar:w-3.5 group-hover/sidebar:h-3.5 text-indigo-400 shrink-0" />
-                <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
-                  Factory Entity
+                <Building2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                {sidebarExpanded && <span className="whitespace-nowrap">Factory Entity</span>}
+              </span>
+              {sidebarExpanded && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Sync
                 </span>
-              </span>
-              <span className="hidden group-hover/sidebar:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 whitespace-nowrap">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Live Sync
-              </span>
+              )}
             </div>
-            <div className="h-0 opacity-0 overflow-hidden group-hover/sidebar:h-auto group-hover/sidebar:opacity-100 transition-all duration-200 whitespace-nowrap">
-              <div className="text-xs font-bold text-slate-100 truncate">
-                {sessionInfo?.userLabel || 'Dinusha Embroidery'}
+            {sidebarExpanded && (
+              <div className="whitespace-nowrap">
+                <div className="text-xs font-bold text-slate-100 truncate">
+                  {sessionInfo?.userLabel || 'Dinusha Embroidery'}
+                </div>
+                <div className="text-[11px] font-mono text-indigo-300 mt-0.5 truncate">
+                  {sessionInfo?.role ? ROLE_LABELS[sessionInfo.role] : 'ERP User'} • 1G 014585
+                </div>
               </div>
-              <div className="text-[11px] font-mono text-indigo-300 mt-0.5 truncate">
-                {sessionInfo?.role ? ROLE_LABELS[sessionInfo.role] : 'ERP User'} • 1G 014585
-              </div>
-            </div>
+            )}
           </div>
 
-          <div className="mt-2.5 flex items-center gap-1.5">
+          <div
+            className={`mt-2.5 flex ${
+              sidebarExpanded ? 'flex-row items-center gap-1.5' : 'flex-col items-center gap-1.5'
+            }`}
+          >
             <Link
               href="/"
               title="Back to Public Business Website"
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white transition-colors"
+              className="w-full flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white transition-colors"
             >
               <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
-                Website
-              </span>
+              {sidebarExpanded && <span className="whitespace-nowrap">Website</span>}
             </Link>
             <button
               type="button"
@@ -488,12 +897,10 @@ export function PayrollManager({
                 router.refresh();
               }}
               title="Lock & Sign Out of ERP"
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-rose-950/50 hover:bg-rose-900/70 border border-rose-800/40 text-[11px] font-bold text-rose-300 hover:text-white transition-colors cursor-pointer"
+              className="w-full flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-rose-950/50 hover:bg-rose-900/70 border border-rose-800/40 text-[11px] font-bold text-rose-300 hover:text-white transition-colors cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5 shrink-0" />
-              <span className="w-0 opacity-0 overflow-hidden group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 whitespace-nowrap transition-all duration-200">
-                Sign Out
-              </span>
+              {sidebarExpanded && <span className="whitespace-nowrap">Sign Out</span>}
             </button>
           </div>
         </div>
@@ -656,6 +1063,7 @@ export function PayrollManager({
                 employees={employees}
                 machines={productionBundle.machines}
                 styles={productionBundle.styles}
+                externalSubTab={needleSubTab}
               />
             </div>
           )}
@@ -666,6 +1074,7 @@ export function PayrollManager({
                 employees={employees}
                 initialBundle={productionBundle}
                 onBundleChange={setProductionBundle}
+                externalSubTab={productionSubTab}
               />
             </div>
           )}
@@ -677,50 +1086,48 @@ export function PayrollManager({
                 productionBundle={productionBundle}
                 initialQualityBundle={qualityBundle}
                 onQualityBundleChange={setQualityBundle}
+                externalSubTab={qualitySubTab}
               />
             </div>
           )}
 
           {activeTab === 'quotations' && allowedSet.has('quotations') && (
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-quotations`}>
-              <QuotationsManagement initialQuotations={initialQuotations} />
+              <QuotationsManagement
+                initialQuotations={initialQuotations}
+                productionBundle={productionBundle}
+                qualityBundle={qualityBundle}
+                externalSubTab={billingSubTab}
+                onOpenCustomerRegistration={() => {
+                  if (allowedSet.has('production')) {
+                    setActiveTab('production');
+                    setProductionSubTab('companyCrud');
+                    setOpenMenus((prev) => ({ ...prev, production: true }));
+                  } else {
+                    setActiveTab('quotations');
+                    setBillingSubTab('customers');
+                  }
+                }}
+              />
             </div>
           )}
 
           {activeTab === 'adminUsers' && allowedSet.has('adminUsers') && (
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-adminUsers`}>
-              <AdminUserManagement currentUserId={sessionInfo?.userId || null} />
+              <AdminUserManagement
+                currentUserId={sessionInfo?.userId || null}
+                externalSubTab={adminSubTab}
+              />
             </div>
           )}
 
-          {activeTab === 'finance' && (
-            <div
-              role="tabpanel"
-              aria-labelledby={`${tabIdPrefix}-desktop-${activeTab}`}
-              className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-8 max-w-2xl mx-auto text-center space-y-4"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
-                <Landmark className="w-6 h-6" />
-              </div>
-              <div className="space-y-1.5">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                  <Clock className="w-3 h-3" />
-                  Planned ERP Module
-                </span>
-                <h3 className="text-lg font-extrabold text-slate-900">{activeNav.label}</h3>
-                <p className="text-xs text-slate-500 max-w-md mx-auto">
-                  {activeNav.label} ({activeNav.subtitle}) is listed in the ERP roadmap and will be
-                  developed next.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab('dashboard')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                Back to Dashboard
-              </button>
+          {activeTab === 'finance' && allowedSet.has('finance') && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-finance`}>
+              <FinancialManagement
+                productionStyles={productionBundle.styles}
+                productionMachines={productionBundle.machines}
+                externalSubTab={financeSubTab}
+              />
             </div>
           )}
         </main>
