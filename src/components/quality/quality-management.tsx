@@ -274,7 +274,76 @@ export function QualityManagement({
 
   const getStationAssignedChecker = (st: QualityCheckerStationEntity | undefined | null): string => {
     if (!st) return '';
-    return resolveRealEmployeeLabel(st.employeeName);
+    return resolveRealEmployeeLabel(st.employeeName) || (st.employeeName || '').trim() || (st.name || '').trim();
+  };
+
+  const getEmployeeCheckerStation = (emp: EmployeeEntity): QualityCheckerStationEntity | undefined => {
+    const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
+    return (
+      findStationWithEmployee(empLabel) ||
+      checkers.find(
+        (st) =>
+          (st.employeeName || '').trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+          st.name.trim().toLowerCase() === emp.fullName.trim().toLowerCase()
+      )
+    );
+  };
+
+  const handleSetCheckerEmployeeDailyStatus = async (
+    emp: EmployeeEntity,
+    nextStatus: CheckerOperationalStatus
+  ) => {
+    const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
+    const existing = getEmployeeCheckerStation(emp);
+    setIsSubmitting(true);
+    const res = await saveCheckerStationAction(
+      {
+        name: existing ? existing.name : emp.fullName,
+        status: nextStatus,
+        employeeName: empLabel,
+      },
+      existing?.id
+    );
+    setIsSubmitting(false);
+    if (!res.success || !res.checker) {
+      showError(res.error || 'Failed to update employee checker status.');
+      return;
+    }
+    const saved = res.checker;
+    setCheckers((prev) => {
+      const exists = prev.some((s) => s.id === saved.id);
+      return exists ? prev.map((s) => (s.id === saved.id ? saved : s)) : [...prev, saved];
+    });
+    if (nextStatus === 'Active') {
+      setPlanStationName(saved.name);
+    }
+    showSuccess(`${emp.fullName} daily checker status updated to ${nextStatus}.`);
+  };
+
+  const handleSetExternalCheckerStatus = async (
+    st: QualityCheckerStationEntity,
+    nextStatus: CheckerOperationalStatus
+  ) => {
+    setIsSubmitting(true);
+    const res = await saveCheckerStationAction(
+      {
+        name: st.name,
+        status: nextStatus,
+        employeeName: (st.employeeName || '').trim() || st.name,
+      },
+      st.id
+    );
+    setIsSubmitting(false);
+    if (!res.success || !res.checker) {
+      showError(res.error || 'Failed to update checker status.');
+      return;
+    }
+    const saved = res.checker;
+    setCheckers((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
+    if (nextStatus === 'Active' && !planStationName) {
+      setPlanStationName(saved.name);
+    }
+    showSuccess(`${st.name} daily status updated to ${nextStatus}.`);
   };
 
   const findStationWithEmployee = (
@@ -340,14 +409,14 @@ export function QualityManagement({
     const existingStation = editingStationId
       ? checkers.find((st) => st.id === editingStationId)
       : undefined;
-    const preservedEmp = existingStation ? getStationAssignedChecker(existingStation) : '';
+    const preservedEmp = existingStation ? getStationAssignedChecker(existingStation) : nameTrim;
 
     setIsSubmitting(true);
     const res = await saveCheckerStationAction(
       {
         name: nameTrim,
         status: stationStatusInput,
-        employeeName: preservedEmp,
+        employeeName: preservedEmp || nameTrim,
       },
       editingStationId || undefined
     );
@@ -2306,13 +2375,180 @@ export function QualityManagement({
 
           {/* Assign Checker & Timeline Block Form */}
           <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-soft">
+            {/* Daily Checker Status & Dashboard Assignment (Our Checker Employees + External Checkers) */}
+            <div className="mb-5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-white to-teal-50/70 p-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-900 flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                    Daily Checker Attendance &amp; Dashboard Assignment ({scheduleDate || planDate})
+                  </h4>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Update today&apos;s status (<span className="font-bold text-emerald-700">Active</span> /{' '}
+                    <span className="font-bold text-amber-700">Break</span> /{' '}
+                    <span className="font-bold text-slate-500">Offline</span>) for Our Checker Employees &amp; External Checkers to assign them directly to today&apos;s Checking Plan.
+                  </p>
+                </div>
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Active on Floor: {checkers.filter((c) => c.status === 'Active').length} / {checkers.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {/* 1. Our Checker Employees */}
+                <div className="rounded-xl border border-indigo-100 bg-white p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-700">
+                      Our Checker Employees ({checkerEmployees.length})
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-500">From Staff Registry</span>
+                  </div>
+                  {checkerEmployees.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-2">
+                      No internal staff with Checker / QC role found.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                      {checkerEmployees.map((emp) => {
+                        const st = getEmployeeCheckerStation(emp);
+                        const currentStatus: CheckerOperationalStatus = st ? st.status : 'Offline';
+                        return (
+                          <div
+                            key={emp.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/70 px-2.5 py-1.5"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-slate-800 truncate">
+                                EPF #{emp.epfNo} - {emp.fullName}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-medium">
+                                {emp.role} {st ? `• Station: ${st.name}` : '• Not yet on board'}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
+                                const isCurrent = currentStatus === statusOpt && Boolean(st);
+                                return (
+                                  <button
+                                    key={statusOpt}
+                                    type="button"
+                                    disabled={isSubmitting}
+                                    onClick={() => handleSetCheckerEmployeeDailyStatus(emp, statusOpt)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                                      isCurrent
+                                        ? statusOpt === 'Active'
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : statusOpt === 'Break'
+                                            ? 'bg-amber-500 text-white shadow-xs'
+                                            : 'bg-slate-600 text-white shadow-xs'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {statusOpt}
+                                  </button>
+                                );
+                              })}
+                              {st && st.status === 'Active' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPlanStationName(st.name)}
+                                  className={`ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold transition cursor-pointer ${
+                                    planStationName === st.name
+                                      ? 'bg-persian-600 text-white'
+                                      : 'bg-persian-50 text-persian-700 border border-persian-200 hover:bg-persian-100'
+                                  }`}
+                                >
+                                  {planStationName === st.name ? 'Selected ✓' : 'Plan →'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. External & Station Checkers */}
+                <div className="rounded-xl border border-teal-100 bg-white p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-teal-700">
+                      External / Station Checkers ({checkers.length})
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-500">Click status to update</span>
+                  </div>
+                  {checkers.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-2">
+                      No external checkers or stations registered yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                      {checkers.map((st) => {
+                        const assignedLabel = getStationAssignedChecker(st);
+                        return (
+                          <div
+                            key={st.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/70 px-2.5 py-1.5"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-slate-800 truncate">{st.name}</div>
+                              <div className="text-[10px] text-slate-500 font-medium truncate">
+                                {assignedLabel}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
+                                const isCurrent = st.status === statusOpt;
+                                return (
+                                  <button
+                                    key={statusOpt}
+                                    type="button"
+                                    disabled={isSubmitting}
+                                    onClick={() => handleSetExternalCheckerStatus(st, statusOpt)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                                      isCurrent
+                                        ? statusOpt === 'Active'
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : statusOpt === 'Break'
+                                            ? 'bg-amber-500 text-white shadow-xs'
+                                            : 'bg-slate-600 text-white shadow-xs'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {statusOpt}
+                                  </button>
+                                );
+                              })}
+                              {st.status !== 'Offline' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPlanStationName(st.name)}
+                                  className={`ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold transition cursor-pointer ${
+                                    planStationName === st.name
+                                      ? 'bg-persian-600 text-white'
+                                      : 'bg-persian-50 text-persian-700 border border-persian-200 hover:bg-persian-100'
+                                  }`}
+                                >
+                                  {planStationName === st.name ? 'Selected ✓' : 'Plan →'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-2.5">
               <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                 <PlusCircle className="w-4 h-4 text-persian-500" />
                 Assign Checker &amp; Timeline Block
               </h3>
               <span className="text-[11px] text-rose-500 font-semibold">
-                * Connected to Checker Stations, Company CRUD, Style Master &amp; Employee Registry
+                * Connected to Checker Employees, External Checkers, Company CRUD &amp; Style Master
               </span>
             </div>
 
@@ -2348,7 +2584,7 @@ export function QualityManagement({
                     htmlFor={`${uid}-sched-station`}
                     className="block text-[10px] font-bold text-slate-600 mb-1"
                   >
-                    Checker Station *
+                    Checker (Employee / External) *
                   </label>
                   <select
                     id={`${uid}-sched-station`}
@@ -2361,7 +2597,7 @@ export function QualityManagement({
                       const stEmp = getStationAssignedChecker(st);
                       return (
                         <option key={st.id} value={st.name}>
-                          {st.name} — {stEmp || '⚠️ Assign Checker'}
+                          [{st.status}] {st.name} — {stEmp || st.name}
                         </option>
                       );
                     })}
@@ -3509,8 +3745,11 @@ export function QualityManagement({
                       </tr>
                     ) : (
                       checkerEmployees.map((emp) => {
+                        const assignedStation = getEmployeeCheckerStation(emp);
                         const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
-                        const assignedStation = findStationWithEmployee(empLabel);
+                        const currentStatus: CheckerOperationalStatus = assignedStation
+                          ? assignedStation.status
+                          : 'Offline';
                         return (
                           <tr key={emp.id} className="hover:bg-slate-50">
                             <th scope="row" className="p-3.5 font-bold text-slate-800 bg-white">
@@ -3530,13 +3769,34 @@ export function QualityManagement({
                                   {assignedStation.name}
                                 </span>
                               ) : (
-                                <span className="text-slate-400">Unassigned</span>
+                                <span className="text-slate-400">Click Active to Assign</span>
                               )}
                             </td>
                             <td className="p-3.5">
-                              <span className="px-2.5 py-1 rounded-md text-[10px] font-bold text-emerald-700 bg-emerald-50">
-                                Active
-                              </span>
+                              <div className="flex items-center gap-1">
+                                {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
+                                  const isCurrent = currentStatus === statusOpt && Boolean(assignedStation);
+                                  return (
+                                    <button
+                                      key={statusOpt}
+                                      type="button"
+                                      disabled={isSubmitting}
+                                      onClick={() => handleSetCheckerEmployeeDailyStatus(emp, statusOpt)}
+                                      className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                                        isCurrent
+                                          ? statusOpt === 'Active'
+                                            ? 'bg-emerald-600 text-white'
+                                            : statusOpt === 'Break'
+                                              ? 'bg-amber-500 text-white'
+                                              : 'bg-slate-600 text-white'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                      }`}
+                                    >
+                                      {statusOpt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -3588,17 +3848,30 @@ export function QualityManagement({
                             )}
                           </td>
                           <td className="p-3.5">
-                            <span
-                              className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
-                                st.status === 'Active'
-                                  ? 'text-emerald-700 bg-emerald-50'
-                                  : st.status === 'Break'
-                                  ? 'text-amber-700 bg-amber-50'
-                                  : 'text-rose-700 bg-rose-50'
-                              }`}
-                            >
-                              {st.status}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
+                                const isCurrent = st.status === statusOpt;
+                                return (
+                                  <button
+                                    key={statusOpt}
+                                    type="button"
+                                    disabled={isSubmitting}
+                                    onClick={() => handleSetExternalCheckerStatus(st, statusOpt)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                                      isCurrent
+                                        ? statusOpt === 'Active'
+                                          ? 'bg-emerald-600 text-white'
+                                          : statusOpt === 'Break'
+                                            ? 'bg-amber-500 text-white'
+                                            : 'bg-slate-600 text-white'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                                  >
+                                    {statusOpt}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </td>
                           <td className="p-3.5 text-center space-x-2">
                             <button

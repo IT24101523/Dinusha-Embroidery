@@ -457,6 +457,47 @@ export async function saveBillingInvoiceAction(
   const auth = await ensureBillingSession();
   if (!auth.ok) return { success: false, error: auth.error };
 
+  if (input.id && !input.id.startsWith('local-')) {
+    const { data: existingInv } = await supabaseAdmin
+      .from('billing_invoices')
+      .select('id, invoice_number, status, total_amount, balance_due')
+      .eq('id', input.id)
+      .maybeSingle();
+
+    const wasPaid =
+      existingInv &&
+      (existingInv.status === 'PAID' ||
+        (Number(existingInv.total_amount) > 0 && Number(existingInv.balance_due) <= 0));
+
+    if (wasPaid && auth.session.role !== 'SUPER_ADMIN') {
+      const { data: approvalRows } = await supabaseAdmin
+        .from('erp_audit_logs')
+        .select('id, action, metadata')
+        .eq('module', 'APPROVAL_REQUEST')
+        .eq('action', 'APPROVED')
+        .limit(100);
+
+      const hasApprovedEdit = (approvalRows || []).some((row) => {
+        const meta =
+          row.metadata && typeof row.metadata === 'object'
+            ? (row.metadata as Record<string, unknown>)
+            : {};
+        return (
+          meta.requestKind === 'INVOICE_EDIT' &&
+          (meta.invoiceId === input.id || meta.invoiceNumber === input.invoiceNumber)
+        );
+      });
+
+      if (!hasApprovedEdit) {
+        return {
+          success: false,
+          error:
+            'This invoice is marked as PAID and locked. Please submit an Admin Approval Request to update it.',
+        };
+      }
+    }
+  }
+
   const rowPayload = {
     invoice_number: input.invoiceNumber,
     order_number: input.orderNumber,
@@ -527,6 +568,47 @@ export async function deleteBillingDocumentAction(
   if (!auth.ok) return { success: false, error: auth.error };
 
   if (id.startsWith('local-')) return { success: true };
+
+  if (table === 'billing_invoices') {
+    const { data: existingInv } = await supabaseAdmin
+      .from('billing_invoices')
+      .select('id, invoice_number, status, total_amount, balance_due')
+      .eq('id', id)
+      .maybeSingle();
+
+    const wasPaid =
+      existingInv &&
+      (existingInv.status === 'PAID' ||
+        (Number(existingInv.total_amount) > 0 && Number(existingInv.balance_due) <= 0));
+
+    if (wasPaid && auth.session.role !== 'SUPER_ADMIN') {
+      const { data: approvalRows } = await supabaseAdmin
+        .from('erp_audit_logs')
+        .select('id, action, metadata')
+        .eq('module', 'APPROVAL_REQUEST')
+        .eq('action', 'APPROVED')
+        .limit(100);
+
+      const hasApprovedDelete = (approvalRows || []).some((row) => {
+        const meta =
+          row.metadata && typeof row.metadata === 'object'
+            ? (row.metadata as Record<string, unknown>)
+            : {};
+        return (
+          meta.requestKind === 'INVOICE_DELETE' &&
+          (meta.invoiceId === id || meta.invoiceNumber === existingInv.invoice_number)
+        );
+      });
+
+      if (!hasApprovedDelete) {
+        return {
+          success: false,
+          error:
+            'Paid invoices cannot be deleted without Admin Approval. Please submit a Delete Request to Admin.',
+        };
+      }
+    }
+  }
 
   const { error } = await supabaseAdmin.from(table).delete().eq('id', id);
   if (error) {

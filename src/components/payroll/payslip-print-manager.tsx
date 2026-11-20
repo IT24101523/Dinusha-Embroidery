@@ -30,6 +30,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
     let isMounted = true;
     async function loadMonthlyRecords() {
       setLoading(true);
+      setSavedRecords({});
       const res = await fetchMonthlyRecordsAction(month);
       if (isMounted) {
         if (res.success && res.data) {
@@ -49,39 +50,17 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
     };
   }, [month]);
 
-  // Compute breakdown for all selected employees (either saved from DB, or dynamic default)
-  const payslipsToPrint: PayrollCalculationBreakdown[] = useMemo(() => {
-    return employees
-      .filter((emp) => selectedIds.includes(emp.id))
-      .map((emp) => {
-        if (savedRecords[emp.id]) {
-          return savedRecords[emp.id];
-        }
+  // Compute breakdown ONLY for employees whose salary has actually been calculated & saved for this month
+  const calculatedEmployees = useMemo(
+    () => employees.filter((emp) => emp.isActive && Boolean(savedRecords[emp.id])),
+    [employees, savedRecords]
+  );
 
-        // Calculate sample/default breakdown if not explicitly saved yet
-        const isSupervisor = emp.role.includes('Supervisor');
-        return calculateSalaryForEmployee(emp, {
-          employeeId: emp.id,
-          month,
-          basicSalary: emp.basicSalary,
-          otHours: isSupervisor ? 98.75 : 0,
-          sotHours: 0,
-          totAmt: 0,
-          poyaDayAmt: 0,
-          sundayAmt: 0,
-          specialLeaveAmt: 0,
-          attAllow: 5000,
-          nightAllow: 0,
-          gradeAllow: isSupervisor ? 35000 : 0,
-          transAllow: 3750,
-          prodAllow: isSupervisor ? 20000 : 0,
-          checkingAllow: 0,
-          lateHours: 0,
-          unpaidDays: 0,
-          advance: 0,
-        });
-      });
-  }, [employees, selectedIds, savedRecords, month]);
+  const payslipsToPrint: PayrollCalculationBreakdown[] = useMemo(() => {
+    return calculatedEmployees
+      .filter((emp) => selectedIds.includes(emp.id))
+      .map((emp) => savedRecords[emp.id]);
+  }, [calculatedEmployees, selectedIds, savedRecords]);
 
   // Group into chunks of 4 for A4 pages (4 payslips per sheet in 2x2 grid)
   const pairedSheets = useMemo(() => {
@@ -126,7 +105,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
     return (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  const filteredEmployees = employees.filter(
+  const filteredEmployees = calculatedEmployees.filter(
     (e) =>
       e.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       String(e.epfNo).includes(searchTerm) ||

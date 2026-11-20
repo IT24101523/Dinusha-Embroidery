@@ -15,6 +15,12 @@ import {
   fetchSalaryRecordAction,
   updateSalaryPaymentStatusAction,
 } from '@/actions/payroll';
+import {
+  submitApprovalRequestAction,
+  fetchApprovalRequestsAction,
+  type ErpApprovalRequestEntity,
+} from '@/actions/admin-users';
+import { LOCAL_APPROVAL_REQUESTS_KEY } from '@/components/admin/admin-user-management';
 import { AdminUnlockModal } from './admin-unlock-modal';
 import {
   Save,
@@ -75,6 +81,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [pendingUnlockRequests, setPendingUnlockRequests] = useState<Record<string, boolean>>({});
   const [shakeSaveBtn, setShakeSaveBtn] = useState(false);
   const [pendingUpdateData, setPendingUpdateData] = useState<MonthlySalaryInputData | null>(null);
   const confirmUpdateDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -163,6 +170,18 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     }
 
     loadExisting();
+    fetchApprovalRequestsAction()
+      .then((res) => {
+        if (!isMounted || !res.success || !res.requests) return;
+        const map: Record<string, boolean> = {};
+        res.requests.forEach((r) => {
+          if (r.requestKind === 'PAYROLL_EDIT' && r.status === 'PENDING') {
+            map[r.targetId] = true;
+          }
+        });
+        setPendingUnlockRequests(map);
+      })
+      .catch(() => {});
     return () => {
       isMounted = false;
     };
@@ -376,6 +395,51 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       });
     } else {
       setUnlockError(res.error || 'Admin authorization failed.');
+    }
+  };
+
+  const handleSendPayrollEditRequestToAdmin = async (reason: string) => {
+    if (!currentEmployee) return;
+    setUnlockError(null);
+    setUnlockLoading(true);
+    const targetId = `${currentEmployee.id}::${month}`;
+    const targetLabel = `EPF #${currentEmployee.epfNo} - ${currentEmployee.fullName} (${month})`;
+    const amountLabel = `LKR ${formatLkr2(calculation?.net || 0)}`;
+
+    const res = await submitApprovalRequestAction({
+      requestKind: 'PAYROLL_EDIT',
+      targetId,
+      targetLabel,
+      amountLabel,
+      reason,
+      employeeId: currentEmployee.id,
+      epfNo: currentEmployee.epfNo,
+      employeeName: currentEmployee.fullName,
+      month,
+    });
+    setUnlockLoading(false);
+
+    if (res.success && res.request) {
+      setPendingUnlockRequests((prev) => ({ ...prev, [targetId]: true }));
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = window.localStorage.getItem(LOCAL_APPROVAL_REQUESTS_KEY);
+          const list = raw ? (JSON.parse(raw) as ErpApprovalRequestEntity[]) : [];
+          window.localStorage.setItem(
+            LOCAL_APPROVAL_REQUESTS_KEY,
+            JSON.stringify([res.request, ...list.filter((r) => r.id !== res.request!.id)])
+          );
+        } catch {
+          // ignore
+        }
+      }
+      setUnlockModalOpen(false);
+      setStatusMsg({
+        type: 'success',
+        text: 'Edit Request Sent to Admin Approval Tab',
+      });
+    } else {
+      setUnlockError(res.error || 'Failed to send request to Admin.');
     }
   };
 
@@ -1130,6 +1194,12 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <Lock className="w-3.5 h-3.5" />
                 Paid &amp; Locked
               </span>
+              {pendingUnlockRequests[`${currentEmployee.id}::${month}`] && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-200 text-xs font-bold whitespace-nowrap">
+                  <Clock className="w-3.5 h-3.5" />
+                  Pending Admin Approval
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1139,7 +1209,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <Unlock className="w-3.5 h-3.5" />
-                Admin Unlock
+                {pendingUnlockRequests[`${currentEmployee.id}::${month}`]
+                  ? 'Admin Request Pending'
+                  : 'Request Admin Edit / Unlock'}
               </button>
             </>
           ) : (
@@ -1230,8 +1302,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           netSalary={calculation?.net}
           loading={unlockLoading}
           errorMsg={unlockError}
+          hasPendingRequest={Boolean(pendingUnlockRequests[`${currentEmployee.id}::${month}`])}
           onClose={() => setUnlockModalOpen(false)}
           onConfirm={handleAdminUnlock}
+          onSendRequestToAdmin={handleSendPayrollEditRequestToAdmin}
         />
       )}
     </div>

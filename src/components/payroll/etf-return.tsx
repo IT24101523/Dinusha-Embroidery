@@ -19,6 +19,7 @@ export function EtfReturn({ employees }: EtfReturnProps) {
     let isMounted = true;
     async function loadRecords() {
       setLoading(true);
+      setSavedRecords({});
       const res = await fetchMonthlyRecordsAction(month);
       if (isMounted) {
         if (res.success && res.data) {

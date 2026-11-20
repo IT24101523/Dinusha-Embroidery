@@ -110,17 +110,17 @@ const CURRENCY_OPTIONS = ['LKR', 'USD', 'EUR', 'GBP'];
 const GARMENT_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size'];
 
 const SHIFT_HOURS = [
-  { col: 1, value: '08:00', label: '08:00 AM', short: 'H1' },
-  { col: 2, value: '09:00', label: '09:00 AM', short: 'H2' },
-  { col: 3, value: '10:00', label: '10:00 AM', short: 'H3' },
-  { col: 4, value: '11:00', label: '11:00 AM', short: 'H4' },
-  { col: 5, value: '12:00', label: '12:00 PM', short: 'H5' },
-  { col: 6, value: '13:00', label: '01:00 PM', short: 'H6' },
-  { col: 7, value: '14:00', label: '02:00 PM', short: 'H7' },
-  { col: 8, value: '15:00', label: '03:00 PM', short: 'H8' },
-  { col: 9, value: '16:00', label: '04:00 PM', short: 'H9' },
-  { col: 10, value: '17:00', label: '05:00 PM', short: 'H10' },
-  { col: 11, value: '18:00', label: '06:00 PM', short: 'H11' },
+  { col: 1, value: '08:00', endValue: '09:00', label: '08:00 AM', endLabel: '09:00 AM', short: 'H1' },
+  { col: 2, value: '09:00', endValue: '10:00', label: '09:00 AM', endLabel: '10:00 AM', short: 'H2' },
+  { col: 3, value: '10:00', endValue: '11:00', label: '10:00 AM', endLabel: '11:00 AM', short: 'H3' },
+  { col: 4, value: '11:00', endValue: '12:00', label: '11:00 AM', endLabel: '12:00 PM', short: 'H4' },
+  { col: 5, value: '12:00', endValue: '13:00', label: '12:00 PM', endLabel: '01:00 PM', short: 'H5' },
+  { col: 6, value: '13:00', endValue: '14:00', label: '01:00 PM', endLabel: '02:00 PM', short: 'H6' },
+  { col: 7, value: '14:00', endValue: '15:00', label: '02:00 PM', endLabel: '03:00 PM', short: 'H7' },
+  { col: 8, value: '15:00', endValue: '16:00', label: '03:00 PM', endLabel: '04:00 PM', short: 'H8' },
+  { col: 9, value: '16:00', endValue: '17:00', label: '04:00 PM', endLabel: '05:00 PM', short: 'H9' },
+  { col: 10, value: '17:00', endValue: '18:00', label: '05:00 PM', endLabel: '06:00 PM', short: 'H10' },
+  { col: 11, value: '18:00', endValue: '19:00', label: '06:00 PM', endLabel: '07:00 PM', short: 'H11' },
 ];
 
 const CLIENT_COLOR_THEMES: Record<
@@ -308,6 +308,14 @@ export function ProductionManagement({
   const activeEmployees = useMemo(
     () => employees.filter((e) => e.isActive !== false),
     [employees]
+  );
+
+  const machineOperatorEmployees = useMemo(
+    () =>
+      activeEmployees.filter((e) =>
+        /operator|ඔපරේටර්/i.test(String(e.role || ''))
+      ),
+    [activeEmployees]
   );
 
   // Validate and resolve an operator/helper label against real active employees from Employee Registry
@@ -3238,7 +3246,7 @@ export function ProductionManagement({
                   >
                     {SHIFT_HOURS.map((h) => (
                       <option key={h.value} value={h.value}>
-                        {h.label} ({h.short})
+                        {h.endLabel} (End of {h.short})
                       </option>
                     ))}
                   </select>
@@ -3271,7 +3279,7 @@ export function ProductionManagement({
                       !planOperator ? 'text-rose-700' : 'text-slate-600'
                     }`}
                   >
-                    {!planOperator ? '⚠️ Assign Operator *' : 'Operator (From Staff) *'}
+                    {!planOperator ? '⚠️ Assign Operator *' : 'Machine Operator *'}
                   </label>
                   <select
                     id={`${uid}-plan-operator`}
@@ -3293,11 +3301,11 @@ export function ProductionManagement({
                     }`}
                   >
                     <option value="">
-                      {activeEmployees.length === 0
-                        ? '-- No Active Staff in Employee Registry --'
+                      {machineOperatorEmployees.length === 0
+                        ? '-- No Machine Operators Registered --'
                         : `⚠️ -- Assign Operator to ${planMachineName || 'Machine'} --`}
                     </option>
-                    {activeEmployees.map((emp) => {
+                    {machineOperatorEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                       const selectedMac = machines.find((m) => m.name === planMachineName);
                       const otherMac = findMachineWithEmployee(
@@ -3698,14 +3706,23 @@ export function ProductionManagement({
                         {machines.length} Units
                       </span>
                     </div>
-                    <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200">
+                    <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200 border-r-2 border-r-rose-500 relative">
                       {SHIFT_HOURS.map((h) => (
                         <div
                           key={h.col}
-                          className="py-1.5 px-1 flex flex-col items-center justify-center bg-slate-50"
+                          className="py-1.5 px-1 flex flex-col items-center justify-center bg-slate-50 relative"
                         >
-                          <span className="font-bold text-slate-800 text-[11px]">{h.value}</span>
-                          <span className="text-[9px] text-slate-400">{h.short}</span>
+                          <span className="font-bold text-slate-800 text-[10px]">
+                            {h.label} – {h.endLabel}
+                          </span>
+                          <span className="text-[9px] text-slate-400">
+                            {h.value}–{h.endValue} ({h.short})
+                          </span>
+                          {h.col === 11 && (
+                            <span className="mt-0.5 px-1.5 py-0.2 rounded bg-rose-600 text-white text-[8px] font-black uppercase tracking-tight">
+                              End 07:00 PM
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -3823,7 +3840,7 @@ export function ProductionManagement({
                                   }`}
                                 >
                                   <option value="">⚠️ Assign Operator</option>
-                                  {activeEmployees.map((emp) => {
+                                  {machineOperatorEmployees.map((emp) => {
                                     const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                                     const otherMac = findMachineWithEmployee(
                                       label,
@@ -4390,14 +4407,18 @@ export function ProductionManagement({
                   Operator + Helper
                 </span>
               </div>
-              <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200">
+              <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200 border-r-2 border-r-rose-500">
                 {SHIFT_HOURS.map((h, idx) => (
                   <div
                     key={h.col}
                     className="py-1 px-0.5 flex flex-col items-center justify-center bg-slate-50/90 leading-tight"
                   >
-                    <span className="font-bold text-slate-800 text-[10px]">{h.label}</span>
-                    <span className="text-[9px] text-slate-400 font-normal">Hour {idx + 1}</span>
+                    <span className="font-bold text-slate-800 text-[9.5px]">
+                      {h.label}–{h.endLabel}
+                    </span>
+                    <span className="text-[8.5px] text-slate-400 font-normal">
+                      Hour {idx + 1} {h.col === 11 ? '• End 07:00 PM' : ''}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -6682,7 +6703,7 @@ export function ProductionManagement({
                   >
                     {SHIFT_HOURS.map((h) => (
                       <option key={h.col} value={h.col}>
-                        {h.label} ({h.short})
+                        {h.endLabel} (End of {h.short})
                       </option>
                     ))}
                   </select>
@@ -6767,7 +6788,7 @@ export function ProductionManagement({
                     }`}
                   >
                     <option value="">-- ⚠️ Assign Operator --</option>
-                    {activeEmployees.map((emp) => {
+                    {machineOperatorEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                       const targetMac = machines.find(
                         (m) => m.name === (modalMachineName || editingBlock.machineName)

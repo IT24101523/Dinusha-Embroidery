@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useMemo, useId } from 'react';
+import React, { useState, useRef, useMemo, useId, useEffect } from 'react';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import {
   EmployeeFormData,
@@ -8,7 +8,11 @@ import {
   calculateAgeFromDob,
   extractBirthYearFromNic,
 } from '@/modules/payroll/domain/validation';
-import { saveEmployeeAction } from '@/actions/employees';
+import {
+  saveEmployeeAction,
+  fetchRemovedEmployeesAction,
+  restoreEmployeeAction,
+} from '@/actions/employees';
 import { DeleteEmployeeModal } from './delete-employee-modal';
 import {
   UserPlus,
@@ -29,12 +33,15 @@ import {
   ShieldAlert,
   Users,
   ArrowLeft,
+  UserX,
+  RotateCcw,
 } from 'lucide-react';
 
 interface EmployeeCrudProps {
   initialEmployees: EmployeeEntity[];
   onEmployeesChange?: (updated: EmployeeEntity[]) => void;
   onOpenCalculator?: (employeeId: string) => void;
+  externalSubTab?: 'directory' | 'form' | 'removed';
 }
 
 const DEFAULT_FORM: EmployeeFormData = {
@@ -138,9 +145,29 @@ export function EmployeeCrud({
   initialEmployees,
   onEmployeesChange,
   onOpenCalculator,
+  externalSubTab,
 }: EmployeeCrudProps) {
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
-  const [subTab, setSubTab] = useState<'directory' | 'form'>('directory');
+  const [removedEmployees, setRemovedEmployees] = useState<EmployeeEntity[]>([]);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<'directory' | 'form' | 'removed'>(
+    externalSubTab || 'directory'
+  );
+
+  useEffect(() => {
+    if (externalSubTab) setSubTab(externalSubTab);
+  }, [externalSubTab]);
+
+  const loadRemovedEmployees = async () => {
+    const res = await fetchRemovedEmployeesAction();
+    if (res.success && res.data) {
+      setRemovedEmployees(res.data);
+    }
+  };
+
+  useEffect(() => {
+    loadRemovedEmployees();
+  }, []);
   const subTabIdPrefix = useId();
   const [formData, setFormData] = useState<EmployeeFormData>(DEFAULT_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -303,6 +330,7 @@ export function EmployeeCrud({
     const removedName = employeeToDelete.fullName;
     const next = employees.filter((e) => e.id !== employeeToDelete.id);
     setEmployees(next);
+    loadRemovedEmployees();
     setStatusMsg({
       type: 'success',
       text: `Employee "${removedName}" has been removed with documented reason.`,
@@ -310,6 +338,27 @@ export function EmployeeCrud({
     if (editingId === employeeToDelete.id) resetForm();
     if (onEmployeesChange) onEmployeesChange(next);
     setEmployeeToDelete(null);
+  };
+
+  const handleRestoreEmployee = async (emp: EmployeeEntity) => {
+    setRestoringId(emp.id);
+    const res = await restoreEmployeeAction(emp.id);
+    setRestoringId(null);
+    if (res.success && res.employee) {
+      const nextActive = [...employees, res.employee].sort((a, b) => a.epfNo - b.epfNo);
+      setEmployees(nextActive);
+      setRemovedEmployees((prev) => prev.filter((item) => item.id !== emp.id));
+      if (onEmployeesChange) onEmployeesChange(nextActive);
+      setStatusMsg({
+        type: 'success',
+        text: `Restored employee "${emp.fullName}" (EPF #${emp.epfNo}) to Active Directory.`,
+      });
+    } else {
+      setStatusMsg({
+        type: 'error',
+        text: res.error || 'Failed to restore employee.',
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -453,6 +502,31 @@ export function EmployeeCrud({
                 EPF #{formData.epfNo}
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            id={`${subTabIdPrefix}-removed`}
+            aria-selected={subTab === 'removed'}
+            onClick={() => setSubTab('removed')}
+            className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              subTab === 'removed'
+                ? 'bg-rose-900 text-white shadow-sm after:content-[""] after:absolute after:inset-x-4 after:bottom-1 after:border-b-2 after:border-rose-300'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <UserX className="w-4 h-4" />
+            <span>Former / Removed Staff (ඉවත් වූ සේවකයින්)</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                subTab === 'removed'
+                  ? 'bg-white/15 text-white'
+                  : 'bg-rose-100 text-rose-700'
+              }`}
+            >
+              {removedEmployees.length}
+            </span>
           </button>
         </div>
 
@@ -1400,6 +1474,109 @@ export function EmployeeCrud({
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Former / Removed Employees Archive */}
+      {subTab === 'removed' && (
+        <div
+          role="tabpanel"
+          aria-labelledby={`${subTabIdPrefix}-removed`}
+          className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+        >
+          <div className="bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-400/30 flex items-center justify-center shrink-0">
+                <UserX className="w-5 h-5 text-rose-300" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold tracking-tight">
+                  Former / Removed Employees Directory (ඉවත් වූ සේවක ලේඛනය)
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Archive of resigned, terminated, or removed staff with documented reason, basic salary &amp; removal date
+                </p>
+              </div>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-rose-500/20 border border-rose-400/30 text-rose-200 text-xs font-bold">
+              {removedEmployees.length} Former Staff
+            </span>
+          </div>
+
+          <div
+            tabIndex={0}
+            role="region"
+            aria-label="Former and Removed Employees Table"
+            className="overflow-x-auto"
+          >
+            <table className="w-full text-left text-xs whitespace-nowrap">
+              <thead className="bg-slate-50 text-slate-600 uppercase font-extrabold border-b border-slate-200">
+                <tr>
+                  <th className="p-3.5">EPF #</th>
+                  <th className="p-3.5">Employee Name</th>
+                  <th className="p-3.5">NIC</th>
+                  <th className="p-3.5">Role &amp; Dept</th>
+                  <th className="p-3.5 text-right">Basic Salary (LKR)</th>
+                  <th className="p-3.5">Removed Date</th>
+                  <th className="p-3.5">Removal Reason &amp; Notes</th>
+                  <th className="p-3.5 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {removedEmployees.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-slate-400">
+                      No removed or resigned employees in the archive.
+                    </td>
+                  </tr>
+                ) : (
+                  removedEmployees.map((emp) => (
+                    <tr key={emp.id} className="hover:bg-rose-50/30">
+                      <td className="p-3.5 font-mono font-extrabold text-slate-800">
+                        #{emp.epfNo}
+                      </td>
+                      <td className="p-3.5">
+                        <div className="font-bold text-slate-900">{emp.fullName}</div>
+                        <div className="text-[11px] text-slate-400">{emp.phone || 'No Phone'}</div>
+                      </td>
+                      <td className="p-3.5 font-mono text-slate-600">{emp.nic}</td>
+                      <td className="p-3.5">
+                        <div className="font-semibold text-slate-800">{emp.role}</div>
+                        <div className="text-[10px] text-slate-500">{emp.department}</div>
+                      </td>
+                      <td className="p-3.5 text-right font-mono font-bold text-slate-800">
+                        {emp.basicSalary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="p-3.5 text-slate-600 font-mono text-[11px]">
+                        {emp.deletedAt ? new Date(emp.deletedAt).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="p-3.5">
+                        <span className="inline-block px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-bold text-[10px]">
+                          {emp.deletionReason || 'Removed'}
+                        </span>
+                        {emp.deletionNotes && (
+                          <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs truncate">
+                            {emp.deletionNotes}
+                          </p>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-center">
+                        <button
+                          type="button"
+                          disabled={restoringId === emp.id}
+                          onClick={() => handleRestoreEmployee(emp)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          {restoringId === emp.id ? 'Restoring...' : 'Restore to Active'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>

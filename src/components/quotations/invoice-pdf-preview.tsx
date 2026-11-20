@@ -6,6 +6,8 @@ import {
   CreditCard,
   Download,
   Edit3,
+  Lock,
+  Unlock,
   X,
 } from 'lucide-react';
 import type { BillingInvoice, BillingQuote } from '@/actions/billing';
@@ -15,6 +17,8 @@ interface DocumentPreviewModalProps {
     | { kind: 'INVOICE'; data: BillingInvoice }
     | { kind: 'QUOTE'; data: BillingQuote }
     | null;
+  isPaidLocked?: boolean;
+  isEditApproved?: boolean;
   onClose: () => void;
   onEdit: () => void;
   onConvertToInvoice?: (quote: BillingQuote) => void;
@@ -35,6 +39,8 @@ function formatLKR(val: number): string {
 
 export function DocumentPreviewModal({
   doc,
+  isPaidLocked = false,
+  isEditApproved = false,
   onClose,
   onEdit,
   onConvertToInvoice,
@@ -186,10 +192,28 @@ export function DocumentPreviewModal({
             <button
               type="button"
               onClick={onEdit}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition cursor-pointer"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                isInvoice && isPaidLocked && !isEditApproved
+                  ? 'bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-400/40'
+                  : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              Edit
+              {isInvoice && isPaidLocked && !isEditApproved ? (
+                <>
+                  <Lock className="w-3.5 h-3.5" />
+                  Paid Locked (Request Admin Edit)
+                </>
+              ) : isInvoice && isEditApproved ? (
+                <>
+                  <Unlock className="w-3.5 h-3.5 text-emerald-300" />
+                  Edit (Admin Approved)
+                </>
+              ) : (
+                <>
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Edit
+                </>
+              )}
             </button>
 
             <button

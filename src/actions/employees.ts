@@ -16,6 +16,41 @@ export async function fetchEmployeesAction(): Promise<{ success: boolean; data?:
   }
 }
 
+export async function fetchRemovedEmployeesAction(): Promise<{
+  success: boolean;
+  data?: EmployeeEntity[];
+  error?: string;
+}> {
+  try {
+    const all = await employeeRepository.getAllEmployees(true);
+    const removed = all.filter((e) => !e.isActive);
+    return { success: true, data: removed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch removed employees';
+    return { success: false, error: message };
+  }
+}
+
+export async function restoreEmployeeAction(
+  id: string
+): Promise<{ success: boolean; employee?: EmployeeEntity; error?: string }> {
+  try {
+    const updated = await employeeRepository.updateEmployee(id, { isActive: true });
+    await recordAuditLog({
+      module: 'Employees',
+      action: 'RESTORE',
+      summary: `Restored former employee EPF #${updated.epfNo} - ${updated.fullName} to active status.`,
+    });
+    revalidatePath('/payroll');
+    revalidatePath('/erp');
+    revalidatePath('/');
+    return { success: true, employee: updated };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to restore employee';
+    return { success: false, error: message };
+  }
+}
+
 export async function saveEmployeeAction(
   data: EmployeeFormData,
   id?: string

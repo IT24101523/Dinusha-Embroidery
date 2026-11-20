@@ -63,7 +63,7 @@ export function generateEpfEtfData(
   const period = formatMonthToPeriod(monthString);
 
   return employees
-    .filter((e) => e.isActive)
+    .filter((e) => e.isActive && Boolean(recordsMap[e.id]))
     .sort((a, b) => a.epfNo - b.epfNo)
     .map((emp) => {
       // Prioritize explicit initials and surname fields, fallback to name parser

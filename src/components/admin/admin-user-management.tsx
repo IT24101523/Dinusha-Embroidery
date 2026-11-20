@@ -4,11 +4,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ErpUserAccountEntity,
   ErpAuditLogEntity,
+  ErpApprovalRequestEntity,
+  ApprovalRequestKind,
+  ApprovalRequestStatus,
   fetchAdminUsersAndLogsAction,
   createErpUserAction,
   updateErpUserAction,
   adminResetUserPasswordAction,
   deleteErpUserAction,
+  resolveApprovalRequestAction,
 } from '@/actions/admin-users';
 import {
   ALL_ERP_MODULES,
@@ -31,11 +35,19 @@ import {
   RefreshCw,
   Search,
   Lock,
+  Unlock,
+  ClipboardCheck,
+  XCircle,
+  Clock,
 } from 'lucide-react';
+
+export type AdminSubTab = 'users' | 'requests' | 'audit';
+
+export const LOCAL_APPROVAL_REQUESTS_KEY = 'dinusha_admin_approval_requests_v1';
 
 interface AdminUserManagementProps {
   currentUserId: string | null;
-  externalSubTab?: 'users' | 'audit';
+  externalSubTab?: AdminSubTab;
 }
 
 const ROLE_OPTIONS: UserRole[] = [
@@ -48,16 +60,21 @@ const ROLE_OPTIONS: UserRole[] = [
 ];
 
 export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUserManagementProps) {
-  const [subTab, setSubTab] = useState<'users' | 'audit'>(externalSubTab || 'users');
+  const [subTab, setSubTab] = useState<AdminSubTab>(externalSubTab || 'users');
 
   useEffect(() => {
     if (externalSubTab) setSubTab(externalSubTab);
   }, [externalSubTab]);
   const [users, setUsers] = useState<ErpUserAccountEntity[]>([]);
   const [logs, setLogs] = useState<ErpAuditLogEntity[]>([]);
+  const [requests, setRequests] = useState<ErpApprovalRequestEntity[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+
+  // Approval Requests filters
+  const [reqStatusFilter, setReqStatusFilter] = useState<'ALL' | ApprovalRequestStatus>('ALL');
+  const [reqKindFilter, setReqKindFilter] = useState<'ALL' | ApprovalRequestKind>('ALL');
 
   // User CRUD Form
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -82,12 +99,121 @@ export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUser
     setLoading(true);
     const res = await fetchAdminUsersAndLogsAction();
     setLoading(false);
+
+    let localList: ErpApprovalRequestEntity[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(LOCAL_APPROVAL_REQUESTS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as ErpApprovalRequestEntity[];
+          if (Array.isArray(parsed)) localList = parsed;
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
     if (res.success) {
       setUsers(res.users || []);
       setLogs(res.logs || []);
+      const serverReqs = res.requests || [];
+      const mergedMap = new Map<string, ErpApprovalRequestEntity>();
+      serverReqs.forEach((r) => mergedMap.set(r.id, r));
+      localList.forEach((r) => {
+        if (!mergedMap.has(r.id)) mergedMap.set(r.id, r);
+      });
+      const merged = Array.from(mergedMap.values()).sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      );
+      setRequests(merged);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(LOCAL_APPROVAL_REQUESTS_KEY, JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+      }
     } else {
+      if (localList.length > 0) setRequests(localList);
       setFeedback({ type: 'err', msg: res.error || 'Failed to load admin data.' });
     }
+  };
+
+  const handleResolveRequest = async (
+    reqItem: ErpApprovalRequestEntity,
+    decision: 'APPROVED' | 'REJECTED'
+  ) => {
+    setFeedback(null);
+    setSubmitting(true);
+
+    let updatedReq: ErpApprovalRequestEntity = {
+      ...reqItem,
+      status: decision,
+      resolvedAt: new Date().toISOString(),
+      resolvedByName: 'Super Admin',
+    };
+
+    if (!reqItem.id.startsWith('local-req-')) {
+      const res = await resolveApprovalRequestAction({
+        requestId: reqItem.id,
+        decision,
+      });
+      if (!res.success) {
+        setSubmitting(false);
+        setFeedback({
+          type: 'err',
+          msg: res.error || 'Failed to resolve approval request.',
+        });
+        return;
+      }
+      if (res.request) updatedReq = res.request;
+    }
+
+    // If this is an approved delete request for a local invoice, also remove it from localStorage invoices
+    if (decision === 'APPROVED' && reqItem.requestKind === 'INVOICE_DELETE' && typeof window !== 'undefined') {
+      try {
+        const rawInv = window.localStorage.getItem('dinusha_billing_invoices_v3');
+        if (rawInv) {
+          const invList = JSON.parse(rawInv) as Array<{ id: string; invoiceNumber: string }>;
+          if (Array.isArray(invList)) {
+            const filtered = invList.filter(
+              (inv) =>
+                inv.id !== reqItem.invoiceId && inv.invoiceNumber !== reqItem.invoiceNumber
+            );
+            window.localStorage.setItem('dinusha_billing_invoices_v3', JSON.stringify(filtered));
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    setRequests((prev) => {
+      const next = prev.map((r) => (r.id === reqItem.id ? updatedReq : r));
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(LOCAL_APPROVAL_REQUESTS_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    });
+
+    setSubmitting(false);
+    setFeedback({
+      type: 'ok',
+      msg:
+        decision === 'APPROVED'
+          ? `Approved request for "${reqItem.targetLabel}". ${
+              reqItem.requestKind === 'PAYROLL_EDIT'
+                ? 'Paid salary record has been unlocked for editing.'
+                : reqItem.requestKind === 'INVOICE_DELETE'
+                  ? 'Paid invoice has been deleted.'
+                  : 'Paid invoice is now unlocked for updating.'
+            }`
+          : `Rejected request for "${reqItem.targetLabel}".`,
+    });
   };
 
   useEffect(() => {
@@ -246,6 +372,19 @@ export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUser
     });
   }, [logs, logSearch, logModuleFilter]);
 
+  const pendingRequestsCount = useMemo(
+    () => requests.filter((r) => r.status === 'PENDING').length,
+    [requests]
+  );
+
+  const filteredRequests = useMemo(() => {
+    return requests.filter((r) => {
+      if (reqStatusFilter !== 'ALL' && r.status !== reqStatusFilter) return false;
+      if (reqKindFilter !== 'ALL' && r.requestKind !== reqKindFilter) return false;
+      return true;
+    });
+  }, [requests, reqStatusFilter, reqKindFilter]);
+
   return (
     <div className="space-y-6">
       {/* Banner */}
@@ -264,7 +403,7 @@ export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUser
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setSubTab('users')}
@@ -276,6 +415,25 @@ export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUser
           >
             <Users className="w-3.5 h-3.5" />
             <span>User Access ({users.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('requests')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+              subTab === 'requests'
+                ? 'bg-amber-400 text-slate-950 shadow-sm'
+                : pendingRequestsCount > 0
+                  ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40 hover:bg-amber-500/35'
+                  : 'bg-white/10 text-blue-100 hover:bg-white/20'
+            }`}
+          >
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            <span>Approval Requests ({requests.length})</span>
+            {pendingRequestsCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white">
+                {pendingRequestsCount} Pending
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -599,7 +757,237 @@ export function AdminUserManagement({ currentUserId, externalSubTab }: AdminUser
       )}
 
       {/* ===================================================================
-          SUB-TAB 2: SYSTEM-WIDE AUDIT LOGS
+          SUB-TAB 2: CENTRALIZED ADMIN APPROVAL REQUESTS (PAYROLL & INVOICES)
+          =================================================================== */}
+      {subTab === 'requests' && (
+        <div className="space-y-5">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl border border-amber-200 p-4 shadow-xs">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
+                Pending Admin Approval
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {pendingRequestsCount}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Waiting for Super Admin / CEO authorization
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-indigo-200 p-4 shadow-xs">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-700">
+                Paid Payroll Edit Requests
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {requests.filter((r) => r.requestKind === 'PAYROLL_EDIT').length}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Requests to reopen &amp; edit PAID salary records
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-blue-200 p-4 shadow-xs">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-blue-700">
+                Paid Invoice Update Requests
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {requests.filter((r) => r.requestKind === 'INVOICE_EDIT').length}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Requests to unlock &amp; edit PAID invoices
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-rose-200 p-4 shadow-xs">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-rose-700">
+                Paid Invoice Delete Requests
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {requests.filter((r) => r.requestKind === 'INVOICE_DELETE').length}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Requests to permanently delete PAID invoices
+              </p>
+            </div>
+          </div>
+
+          {/* Filter & Action Bar */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setReqStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    reqStatusFilter === st
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {st === 'ALL' ? 'All Statuses' : st}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: 'ALL', label: 'All Request Types' },
+                  { id: 'PAYROLL_EDIT', label: 'Paid Payroll Edit' },
+                  { id: 'INVOICE_EDIT', label: 'Paid Invoice Update' },
+                  { id: 'INVOICE_DELETE', label: 'Paid Invoice Delete' },
+                ] as const
+              ).map((k) => (
+                <button
+                  key={k.id}
+                  type="button"
+                  onClick={() => setReqKindFilter(k.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    reqKindFilter === k.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Requests Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label="Admin Approval Requests Table"
+              className="overflow-x-auto"
+            >
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900 text-white uppercase text-[11px] font-bold">
+                  <tr>
+                    <th className="p-3.5">Requested Date</th>
+                    <th className="p-3.5">Request Type</th>
+                    <th className="p-3.5">Target Record (Salary / Invoice)</th>
+                    <th className="p-3.5">Amount</th>
+                    <th className="p-3.5">Reason for Request</th>
+                    <th className="p-3.5">Requested By</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Admin Decision</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-500 font-semibold">
+                        No approval requests found matching the current filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRequests.map((reqItem) => (
+                      <tr key={reqItem.id} className="hover:bg-slate-50/80 transition">
+                        <td className="p-3.5 whitespace-nowrap font-mono text-[11px] text-slate-600">
+                          {reqItem.createdAt
+                            ? new Date(reqItem.createdAt).toLocaleString()
+                            : '—'}
+                        </td>
+                        <td className="p-3.5 whitespace-nowrap">
+                          {reqItem.requestKind === 'PAYROLL_EDIT' ? (
+                            <span className="px-2.5 py-1 rounded-md text-[10px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              PAID PAYROLL EDIT
+                            </span>
+                          ) : reqItem.requestKind === 'INVOICE_DELETE' ? (
+                            <span className="px-2.5 py-1 rounded-md text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                              PAID INVOICE DELETE
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                              PAID INVOICE UPDATE
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 font-extrabold text-slate-900">
+                          {reqItem.targetLabel}
+                        </td>
+                        <td className="p-3.5 whitespace-nowrap font-mono font-black text-emerald-700">
+                          {reqItem.amountLabel || '—'}
+                        </td>
+                        <td className="p-3.5 text-slate-700 max-w-xs">
+                          <div className="font-semibold text-slate-800">{reqItem.reason}</div>
+                        </td>
+                        <td className="p-3.5 whitespace-nowrap">
+                          <div className="font-bold text-slate-900">{reqItem.requestedByName}</div>
+                          {reqItem.requestedByEmail && (
+                            <div className="text-[10px] text-slate-500">
+                              {reqItem.requestedByEmail}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3.5 whitespace-nowrap">
+                          {reqItem.status === 'PENDING' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> PENDING
+                            </span>
+                          ) : reqItem.status === 'APPROVED' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> APPROVED
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200 inline-flex items-center gap-1">
+                              <XCircle className="w-3 h-3" /> REJECTED
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          {reqItem.status === 'PENDING' ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => handleResolveRequest(reqItem, 'APPROVED')}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] transition inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                <Unlock className="w-3 h-3" />
+                                {reqItem.requestKind === 'INVOICE_DELETE'
+                                  ? 'Approve & Delete'
+                                  : 'Approve & Unlock'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => handleResolveRequest(reqItem, 'REJECTED')}
+                                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-500">
+                              <span className="font-bold text-slate-700">
+                                {reqItem.status === 'APPROVED' ? 'Approved' : 'Rejected'}
+                              </span>{' '}
+                              {reqItem.resolvedByName ? `by ${reqItem.resolvedByName}` : ''}
+                              {reqItem.resolvedAt && (
+                                <div className="text-[10px] font-mono text-slate-400">
+                                  {new Date(reqItem.resolvedAt).toLocaleDateString()}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================
+          SUB-TAB 3: SYSTEM-WIDE AUDIT LOGS
           =================================================================== */}
       {subTab === 'audit' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">

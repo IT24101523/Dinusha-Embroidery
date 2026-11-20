@@ -413,17 +413,8 @@ export function FinancialManagement({
   }, [filteredRevenue, rateUSD, rateEUR, rateGBP, availableStyles]);
 
   const combinedSalaryLogs = useMemo(() => {
-    const seen = new Set(salaryLogs.map((s) => `${s.month}::${s.name.toLowerCase()}`));
-    const merged = [...salaryLogs];
-    erpPayrollLogs.forEach((erpRec) => {
-      const key = `${erpRec.month}::${erpRec.name.toLowerCase()}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(erpRec);
-      }
-    });
-    return merged;
-  }, [salaryLogs, erpPayrollLogs]);
+    return erpPayrollLogs;
+  }, [erpPayrollLogs]);
 
   const monthSalaries = useMemo(
     () => combinedSalaryLogs.filter((s) => s.month === activeBaseMonth),
@@ -1489,242 +1480,101 @@ export function FinancialManagement({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* SALARY FORM */}
-            <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200/90 lg:col-span-1 h-fit">
-              <div className="flex items-center justify-between gap-2 mb-4">
-                <h3 className="font-extrabold text-xs uppercase text-slate-600 flex items-center gap-2">
-                  <Plus className="w-4 h-4 text-rose-500" /> Log Staff Salary
+          {/* LIVE ERP PAYROLL LEDGER (NO MANUAL FAKE FORM — SYNCED DIRECTLY FROM ERP PAYROLL) */}
+          <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200/90 space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <div>
+                <h3 className="font-extrabold text-xs uppercase text-slate-700 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-rose-500" /> ERP Staff Payroll Ledger (Synced Live from Salary Calculator)
                 </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Showing calculated ERP salaries for{' '}
+                  <span className="font-bold text-[#1c39bb]">{activeBaseMonth}</span>. Only months calculated in{' '}
+                  <strong>Payroll &rarr; Salary Calculator</strong> are displayed here.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={isImportingPayroll}
                   onClick={handleImportErpPayroll}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold transition cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer disabled:opacity-50"
                 >
-                  <Download className="w-3 h-3" />
-                  {isImportingPayroll ? 'Syncing...' : 'Sync ERP Payroll'}
+                  <Download className="w-3.5 h-3.5" />
+                  {isImportingPayroll ? 'Syncing...' : 'Refresh from ERP Payroll'}
                 </button>
-              </div>
-              <form onSubmit={handleAddSalary} className="space-y-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payroll Month *</label>
-                  <input
-                    type="month"
-                    value={salMonth}
-                    onChange={(e) => setSalMonth(e.target.value)}
-                    required
-                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-[#002d62] outline-none focus:border-rose-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Employee Name / ID *
-                  </label>
-                  <input
-                    type="text"
-                    value={salName}
-                    onChange={(e) => setSalName(e.target.value)}
-                    placeholder="e.g. Kamal Perera (EMP-04)"
-                    required
-                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-rose-500"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Basic Salary (LKR) *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={salBasic}
-                      onChange={(e) => handleBasicChange(e.target.value)}
-                      placeholder="35000"
-                      required
-                      className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-rose-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      OT &amp; Allowances
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={salOt}
-                      onChange={(e) => setSalOt(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-rose-500"
-                    />
-                  </div>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase text-slate-500">
-                      Statutory Contributions
-                    </span>
-                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-[#1c39bb] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={salManualOverride}
-                        onChange={(e) => handleToggleManualOverride(e.target.checked)}
-                        className="rounded text-[#1c39bb]"
-                      />
-                      Manual Override
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                        Employer EPF (12%)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        value={salEpf12}
-                        readOnly={!salManualOverride}
-                        onChange={(e) => setSalEpf12(e.target.value)}
-                        className={`w-full p-2 rounded-xl text-xs font-bold outline-none border ${
-                          salManualOverride
-                            ? 'bg-white border-[#1c39bb] text-slate-800'
-                            : 'bg-slate-100 border-slate-300 text-slate-600'
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                        Employer ETF (3%)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        value={salEtf3}
-                        readOnly={!salManualOverride}
-                        onChange={(e) => setSalEtf3(e.target.value)}
-                        className={`w-full p-2 rounded-xl text-xs font-bold outline-none border ${
-                          salManualOverride
-                            ? 'bg-white border-[#1c39bb] text-slate-800'
-                            : 'bg-slate-100 border-slate-300 text-slate-600'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment Status *</label>
-                  <select
-                    value={salStatus}
-                    onChange={(e) => setSalStatus(e.target.value as 'Paid' | 'Pending')}
-                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold outline-none focus:border-rose-500 cursor-pointer"
-                  >
-                    <option value="Paid">Paid</option>
-                    <option value="Pending">Pending</option>
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold p-2.5 rounded-xl text-xs shadow-sm transition-all cursor-pointer"
-                >
-                  Save Staff Salary Record
-                </button>
-              </form>
-            </div>
-
-            {/* SALARY LEDGER TABLE */}
-            <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200/90 lg:col-span-2">
-              <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-                <div>
-                  <h3 className="font-extrabold text-xs uppercase text-slate-600 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-rose-500" /> Staff Payroll Ledger
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Showing records for <span className="font-bold text-[#1c39bb]">{activeBaseMonth}</span>
-                  </p>
-                </div>
-                <span className="text-xs font-bold text-rose-700 bg-rose-50 px-3 py-1 rounded-full border border-rose-200">
-                  Total: {formatLKR(salaryMetrics.totalMonthlyLabor)}
+                <span className="text-xs font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+                  Total Employer Cost: {formatLKR(salaryMetrics.totalMonthlyLabor)}
                 </span>
               </div>
-              <div
-                tabIndex={0}
-                role="region"
-                aria-label="Staff Payroll Ledger"
-                className="overflow-x-auto rounded-xl border border-slate-200 max-h-[540px]"
-              >
-                <table className="w-full text-left text-xs whitespace-nowrap">
-                  <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
+            </div>
+
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label="Staff Payroll Ledger"
+              className="overflow-x-auto rounded-xl border border-slate-200 max-h-[540px]"
+            >
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-3">Employee (EPF #)</th>
+                    <th className="p-3 text-right">Basic (LKR)</th>
+                    <th className="p-3 text-right">OT &amp; Allowances</th>
+                    <th className="p-3 text-right">Employer EPF 12% + ETF 3%</th>
+                    <th className="p-3 text-right">Employer Total Cost</th>
+                    <th className="p-3 text-center">Payroll Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {monthSalaries.length > 0 ? (
+                    monthSalaries.map((rec) => {
+                      const epfEtf = rec.epf12 + rec.etf3;
+                      const empTotal = rec.basic + rec.ot + epfEtf;
+                      const isPaid = rec.status === 'Paid';
+                      return (
+                        <tr key={rec.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-bold text-slate-800">{rec.name}</td>
+                          <td className="p-3 text-right font-mono text-slate-700">
+                            {rec.basic.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-slate-600">
+                            {rec.ot.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-[#002d62]">
+                            {epfEtf.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-black text-rose-700 tabular-nums">
+                            {formatLKR(empTotal)}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                isPaid
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {isPaid ? (
+                                <CheckCircle2 className="w-3 h-3" />
+                              ) : (
+                                <Clock className="w-3 h-3" />
+                              )}
+                              {isPaid ? 'PAID & LOCKED' : 'CALCULATED (APPROVED)'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
                     <tr>
-                      <th className="p-3">Employee</th>
-                      <th className="p-3 text-right">Basic (LKR)</th>
-                      <th className="p-3 text-right">OT &amp; Allow.</th>
-                      <th className="p-3 text-right">EPF 12% + ETF 3%</th>
-                      <th className="p-3 text-right">Employer Total</th>
-                      <th className="p-3 text-center">Status</th>
-                      <th className="p-3 text-center">Del</th>
+                      <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">
+                        No salaries calculated in ERP Payroll for <strong>{activeBaseMonth}</strong> yet. Calculate salaries in <strong>Payroll &rarr; Salary Calculator</strong> to see them here automatically.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {monthSalaries.length > 0 ? (
-                      monthSalaries.map((rec) => {
-                        const epfEtf = rec.epf12 + rec.etf3;
-                        const empTotal = rec.basic + rec.ot + epfEtf;
-                        const isPaid = rec.status === 'Paid';
-                        return (
-                          <tr key={rec.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-bold text-slate-800">{rec.name}</td>
-                            <td className="p-3 text-right font-mono text-slate-700">
-                              {rec.basic.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3 text-right font-mono text-slate-600">
-                              {rec.ot.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3 text-right font-mono text-[#002d62]">
-                              {epfEtf.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3 text-right font-black text-rose-700 tabular-nums">
-                              {formatLKR(empTotal)}
-                            </td>
-                            <td className="p-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleSalaryStatus(rec)}
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition-colors cursor-pointer ${
-                                  isPaid
-                                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                    : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-                                }`}
-                              >
-                                {isPaid ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                {rec.status}
-                              </button>
-                            </td>
-                            <td className="p-3 text-center">
-                              <button
-                                type="button"
-                                aria-label="Delete salary record"
-                                onClick={() => handleDeleteSalary(rec)}
-                                className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={7} className="p-6 text-center text-slate-400">
-                          No staff salary records found for {activeBaseMonth}.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

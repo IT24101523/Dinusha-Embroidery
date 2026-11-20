@@ -13,6 +13,10 @@ import type { UserRole } from '@/db/schema/users';
 import { FactoryDashboard } from '@/components/dashboard/factory-dashboard';
 import { NeedleManagement, type NeedleSubTab } from '@/components/needle/needle-management';
 import {
+  NormalInventoryManagement,
+  type NormalInventorySubTab,
+} from '@/components/inventory/normal-inventory-management';
+import {
   ProductionManagement,
   type ProductionSubTab,
 } from '@/components/production/production-management';
@@ -56,6 +60,8 @@ import {
   ShieldAlert,
   PanelLeftClose,
   PanelLeftOpen,
+  Boxes,
+  Layers,
 } from 'lucide-react';
 
 export interface PayrollManagerSessionInfo {
@@ -111,11 +117,12 @@ export function PayrollManager({
   const [payrollOpen, setPayrollOpen] = useState(false);
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const [needleSubTab, setNeedleSubTab] = useState<NeedleSubTab>('inventory');
+  const [inventorySubTab, setInventorySubTab] = useState<NormalInventorySubTab>('inventory');
   const [productionSubTab, setProductionSubTab] = useState<ProductionSubTab>('planEditor');
   const [qualitySubTab, setQualitySubTab] = useState<QualitySubTab>('checkingEditor');
   const [billingSubTab, setBillingSubTab] = useState<BillingWorkspaceTab>('invoices');
   const [financeSubTab, setFinanceSubTab] = useState<FinanceSubTab>('dashboard');
-  const [adminSubTab, setAdminSubTab] = useState<'users' | 'audit'>('users');
+  const [adminSubTab, setAdminSubTab] = useState<'users' | 'requests' | 'audit'>('users');
 
   const toggleMenu = (key: string) => {
     setOpenMenus((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -193,6 +200,14 @@ export function PayrollManager({
         subtitle: 'Broken Needle Log & Stock Control',
         badge: 'Live',
         icon: Pin,
+      },
+      {
+        id: 'inventory',
+        section: 'overview',
+        label: 'Normal Inventory',
+        subtitle: 'Backing, Double Side, Bobbin & Thread Cone Stock',
+        badge: 'Live',
+        icon: Boxes,
       },
       {
         id: 'production',
@@ -417,6 +432,59 @@ export function PayrollManager({
                     onSelect: () => {
                       setActiveTab('needle');
                       setNeedleSubTab('stockManage');
+                    },
+                  },
+                ],
+              },
+              {
+                key: 'inventory',
+                allowed:
+                  allowedSet.has('inventory') ||
+                  allowedSet.has('needle') ||
+                  allowedSet.has('production'),
+                title: 'Normal Inventory',
+                subtitle: 'Backing, Double Side, Bobbin & Thread Cone',
+                icon: Boxes,
+                isActive: activeTab === 'inventory',
+                subItems: [
+                  {
+                    id: 'inv-directory',
+                    label: 'Material Stock Directory',
+                    icon: Boxes,
+                    isSelected: activeTab === 'inventory' && inventorySubTab === 'inventory',
+                    onSelect: () => {
+                      setActiveTab('inventory');
+                      setInventorySubTab('inventory');
+                    },
+                  },
+                  {
+                    id: 'inv-usageLog',
+                    label: 'Issued & Restock Sheet',
+                    icon: Table2,
+                    isSelected: activeTab === 'inventory' && inventorySubTab === 'usageLog',
+                    onSelect: () => {
+                      setActiveTab('inventory');
+                      setInventorySubTab('usageLog');
+                    },
+                  },
+                  {
+                    id: 'inv-issueMaterial',
+                    label: 'Issue Material to Floor',
+                    icon: Layers,
+                    isSelected: activeTab === 'inventory' && inventorySubTab === 'issueMaterial',
+                    onSelect: () => {
+                      setActiveTab('inventory');
+                      setInventorySubTab('issueMaterial');
+                    },
+                  },
+                  {
+                    id: 'inv-stockManage',
+                    label: 'New Material & Restock',
+                    icon: Sparkles,
+                    isSelected: activeTab === 'inventory' && inventorySubTab === 'stockManage',
+                    onSelect: () => {
+                      setActiveTab('inventory');
+                      setInventorySubTab('stockManage');
                     },
                   },
                 ],
@@ -678,7 +746,7 @@ export function PayrollManager({
                 key: 'adminUsers',
                 allowed: allowedSet.has('adminUsers'),
                 title: 'User Access & Audit',
-                subtitle: 'RBAC, Password Reset & Audit Logs',
+                subtitle: 'RBAC, Approvals & Audit Logs',
                 icon: ShieldAlert,
                 isActive: activeTab === 'adminUsers',
                 subItems: [
@@ -691,6 +759,17 @@ export function PayrollManager({
                     onSelect: () => {
                       setActiveTab('adminUsers');
                       setAdminSubTab('users');
+                    },
+                  },
+                  {
+                    id: 'adm-requests',
+                    label: 'Approval Requests',
+                    badge: 'New',
+                    icon: ClipboardCheck,
+                    isSelected: activeTab === 'adminUsers' && adminSubTab === 'requests',
+                    onSelect: () => {
+                      setActiveTab('adminUsers');
+                      setAdminSubTab('requests');
                     },
                   },
                   {
@@ -1068,6 +1147,17 @@ export function PayrollManager({
             </div>
           )}
 
+          {activeTab === 'inventory' && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-inventory`}>
+              <NormalInventoryManagement
+                employees={employees}
+                machines={productionBundle.machines}
+                styles={productionBundle.styles}
+                externalSubTab={inventorySubTab}
+              />
+            </div>
+          )}
+
           {activeTab === 'production' && (
             <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-production`}>
               <ProductionManagement
@@ -1098,6 +1188,7 @@ export function PayrollManager({
                 productionBundle={productionBundle}
                 qualityBundle={qualityBundle}
                 externalSubTab={billingSubTab}
+                userRole={sessionInfo?.role || null}
                 onOpenCustomerRegistration={() => {
                   if (allowedSet.has('production')) {
                     setActiveTab('production');

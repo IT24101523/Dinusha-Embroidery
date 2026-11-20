@@ -27,8 +27,11 @@ export type DashboardTargetTab =
   | 'printManager'
   | 'salarySheet'
   | 'needle'
+  | 'inventory'
   | 'production'
   | 'quality'
+  | 'quotations'
+  | 'adminUsers'
   | 'finance';
 
 interface FactoryDashboardProps {
@@ -475,6 +478,18 @@ export function FactoryDashboard({
 
               <button
                 type="button"
+                onClick={() => onNavigate('inventory')}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 transition cursor-pointer"
+              >
+                <span className="font-bold flex items-center gap-2 text-emerald-200">
+                  <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                  Normal Inventory
+                </span>
+                <span className="text-[10px] font-mono font-bold text-emerald-300">Active</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => onNavigate('production')}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 transition cursor-pointer"
               >
@@ -488,28 +503,56 @@ export function FactoryDashboard({
               <button
                 type="button"
                 onClick={() => onNavigate('quality')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800/80 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
               >
-                <span className="font-semibold flex items-center gap-2 text-slate-300">
-                  <ClipboardCheck className="w-3.5 h-3.5 text-slate-400" />
+                <span className="font-semibold flex items-center gap-2 text-emerald-300">
+                  <ClipboardCheck className="w-3.5 h-3.5" />
                   Quality Checking
                 </span>
-                <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Planned
+                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Active
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('quotations')}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
+              >
+                <span className="font-semibold flex items-center gap-2 text-emerald-300">
+                  <FileCheck className="w-3.5 h-3.5" />
+                  Invoices & Quotations
+                </span>
+                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Active
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => onNavigate('finance')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800/80 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
               >
-                <span className="font-semibold flex items-center gap-2 text-slate-300">
-                  <Landmark className="w-3.5 h-3.5 text-slate-400" />
-                  Financial Manager
+                <span className="font-semibold flex items-center gap-2 text-emerald-300">
+                  <Landmark className="w-3.5 h-3.5" />
+                  Financial Governance
                 </span>
-                <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Planned
+                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Active
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('adminUsers')}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
+              >
+                <span className="font-semibold flex items-center gap-2 text-emerald-300">
+                  <Users className="w-3.5 h-3.5" />
+                  User Access & Audit
+                </span>
+                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Active
                 </span>
               </button>
             </div>

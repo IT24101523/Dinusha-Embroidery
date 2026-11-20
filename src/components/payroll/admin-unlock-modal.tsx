@@ -11,8 +11,10 @@ interface AdminUnlockModalProps {
   netSalary?: number;
   loading?: boolean;
   errorMsg?: string | null;
+  hasPendingRequest?: boolean;
   onClose: () => void;
   onConfirm: (adminPin: string, adminReason: string) => void | Promise<void>;
+  onSendRequestToAdmin?: (reason: string) => void | Promise<void>;
 }
 
 export function AdminUnlockModal({
@@ -23,9 +25,12 @@ export function AdminUnlockModal({
   netSalary,
   loading = false,
   errorMsg = null,
+  hasPendingRequest = false,
   onClose,
   onConfirm,
+  onSendRequestToAdmin,
 }: AdminUnlockModalProps) {
+  const [mode, setMode] = useState<'request' | 'pin'>('request');
   const [adminPin, setAdminPin] = useState<string>('');
   const [adminReason, setAdminReason] = useState<string>('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -75,12 +80,16 @@ export function AdminUnlockModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
-    if (!adminPin.trim()) {
-      setLocalError('Please enter the Admin Authorization PIN.');
-      return;
-    }
     if (adminReason.trim().length < 3) {
       setLocalError('Please provide an authorization reason (at least 3 characters).');
+      return;
+    }
+    if (mode === 'request' && onSendRequestToAdmin) {
+      onSendRequestToAdmin(adminReason.trim());
+      return;
+    }
+    if (!adminPin.trim()) {
+      setLocalError('Please enter the Admin Authorization PIN.');
       return;
     }
     onConfirm(adminPin.trim(), adminReason.trim());
@@ -149,44 +158,81 @@ export function AdminUnlockModal({
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="admin-unlock-pin"
-                className="block text-xs font-bold text-slate-700 flex items-center gap-1.5"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                Admin Authorization PIN *
-              </label>
-              <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                Default PIN: 1234
-              </span>
+          {hasPendingRequest && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
+              ⏳ A request to edit this Paid Salary is already <strong>PENDING</strong> in the Admin&apos;s{' '}
+              <strong>Approval Requests</strong> tab. Once approved by Admin, this salary will unlock automatically.
             </div>
-            <input
-              id="admin-unlock-pin"
-              type="password"
-              inputMode="numeric"
-              placeholder="Enter Admin PIN"
-              value={adminPin}
-              onChange={(e) => {
-                setAdminPin(e.target.value);
+          )}
+
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('request');
                 setLocalError(null);
               }}
-              className="w-full px-3.5 py-2 text-sm font-mono border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
-            />
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                mode === 'request'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Send Edit Request to Admin
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('pin');
+                setLocalError(null);
+              }}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                mode === 'pin'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Direct Admin PIN Unlock
+            </button>
           </div>
+
+          {mode === 'pin' && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="admin-unlock-pin"
+                  className="block text-xs font-bold text-slate-700 flex items-center gap-1.5"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                  Admin Authorization PIN *
+                </label>
+              </div>
+              <input
+                id="admin-unlock-pin"
+                type="password"
+                inputMode="numeric"
+                placeholder="Enter Admin PIN"
+                value={adminPin}
+                onChange={(e) => {
+                  setAdminPin(e.target.value);
+                  setLocalError(null);
+                }}
+                className="w-full px-3.5 py-2 text-sm font-mono border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label
               htmlFor="admin-unlock-reason"
               className="block text-xs font-bold text-slate-700"
             >
-              Reason for Reopening Paid Salary *
+              Reason for Editing Paid Salary *
             </label>
             <textarea
               id="admin-unlock-reason"
               rows={2}
-              placeholder="e.g. Missed 4 hours OT correction approved by Management"
+              placeholder="e.g. Missed 4 hours OT correction — requesting Admin approval to edit"
               value={adminReason}
               onChange={(e) => {
                 setAdminReason(e.target.value);
@@ -213,7 +259,7 @@ export function AdminUnlockModal({
             className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
-            Authorize &amp; Unlock Salary
+            {mode === 'request' ? 'Send Edit Request to Admin' : 'Authorize & Unlock Salary'}
           </button>
         </div>
       </form>

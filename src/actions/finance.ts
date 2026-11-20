@@ -96,49 +96,59 @@ export async function fetchFinanceBundleAction(): Promise<{
     const auth = await ensureFinanceSession();
     if (!auth.ok) return { success: false, error: auth.error };
 
-    const [revRes, salRes, cogsRes, opexRes, erpPayRes] = await Promise.all([
+    const [revRes, salRes, cogsRes, opexRes, erpPayRes, activeEmpRes] = await Promise.all([
       supabaseAdmin.from('finance_revenue_logs').select('*').order('log_date', { ascending: false }),
       supabaseAdmin.from('finance_salary_logs').select('*').order('payroll_month', { ascending: false }),
       supabaseAdmin.from('finance_cogs_logs').select('*').order('log_date', { ascending: false }),
       supabaseAdmin.from('finance_opex_logs').select('*').order('log_date', { ascending: false }),
       supabaseAdmin
         .from('payroll_records')
-        .select('*, employees!inner(is_active, deleted_at)')
-        .eq('employees.is_active', true)
-        .is('employees.deleted_at', null)
+        .select('*')
         .order('month', { ascending: false }),
+      supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('is_active', true),
     ]);
 
-    const erpPayrollLogs: FinanceSalaryLog[] = (erpPayRes.data || []).map((r) => {
-      const otAndAllowances =
-        (Number(r.prod_allow) || 0) +
-        (Number(r.grade_allow) || 0) +
-        (Number(r.att_allow) || 0) +
-        (Number(r.trans_allow) || 0) +
-        (Number(r.night_allow) || 0) +
-        (Number(r.checking_allow) || 0) +
-        (Number(r.ot_amt) || 0) +
-        (Number(r.sot_amt) || 0) +
-        (Number(r.tot_amt) || 0) +
-        (Number(r.poya_day_amt) || 0) +
-        (Number(r.sunday_amt) || 0) +
-        (Number(r.special_leave_amt) || 0);
+    const activeEmpIds = new Set(
+      (activeEmpRes.data || []).map((e) => String(e.id))
+    );
 
-      const basic = Number(r.basic) || 0;
-      const epf12 = Number(r.epf_12) || Math.round(basic * 0.12 * 100) / 100;
-      const etf3 = Number(r.etf_3) || Math.round(basic * 0.03 * 100) / 100;
+    const erpPayrollLogs: FinanceSalaryLog[] = (erpPayRes.data || [])
+      .filter((r) => activeEmpIds.size === 0 || activeEmpIds.has(String(r.employee_id || '')))
+      .map((r) => {
+        const otAndAllowances =
+          (Number(r.prod_allow) || 0) +
+          (Number(r.grade_allow) || 0) +
+          (Number(r.att_allow) || 0) +
+          (Number(r.trans_allow) || 0) +
+          (Number(r.night_allow) || 0) +
+          (Number(r.checking_allow) || 0) +
+          (Number(r.ot_amt) || 0) +
+          (Number(r.sot_amt) || 0) +
+          (Number(r.tot_amt) || 0) +
+          (Number(r.poya_day_amt) || 0) +
+          (Number(r.sunday_amt) || 0) +
+          (Number(r.special_leave_amt) || 0);
 
-      return {
-        id: `erp-${String(r.id)}`,
-        month: normalizePayrollMonth(String(r.month || '')),
-        name: `${String(r.name || 'Employee')} (EPF-${String(r.epf_no || '')})`,
-        basic,
-        ot: Math.round(otAndAllowances * 100) / 100,
-        epf12,
-        etf3,
-        status: String(r.status || '').toUpperCase() === 'PAID' ? 'Paid' : 'Pending',
-      };
-    });
+        const basic = Number(r.basic) || 0;
+        const epf12 =
+          Number(r.epf12 ?? r.epf_12) || Math.round(basic * 0.12 * 100) / 100;
+        const etf3 =
+          Number(r.etf3 ?? r.etf_3) || Math.round(basic * 0.03 * 100) / 100;
+
+        return {
+          id: `erp-${String(r.id)}`,
+          month: normalizePayrollMonth(String(r.month || '')),
+          name: `${String(r.name || 'Employee')} (EPF #${String(r.epf_no || '')})`,
+          basic,
+          ot: Math.round(otAndAllowances * 100) / 100,
+          epf12,
+          etf3,
+          status: String(r.status || '').toUpperCase() === 'PAID' ? 'Paid' : 'Pending',
+        };
+      });
 
     const firstError = revRes.error || salRes.error || cogsRes.error || opexRes.error;
     if (firstError) {

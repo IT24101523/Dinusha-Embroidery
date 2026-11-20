@@ -9,6 +9,7 @@ export type ErpModuleId =
   | 'etf'
   | 'epf'
   | 'needle'
+  | 'inventory'
   | 'production'
   | 'quality'
   | 'quotations'
@@ -78,6 +79,12 @@ export const ALL_ERP_MODULES: ErpModuleMeta[] = [
     description: 'Broken Needle Log & Stock Control',
   },
   {
+    id: 'inventory',
+    label: 'Normal Inventory',
+    category: 'Operations',
+    description: 'Backing, Double Side, Bobbin, Thread Cone & Low Stock Control',
+  },
+  {
     id: 'production',
     label: 'Production Management',
     category: 'Operations',
@@ -124,6 +131,7 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'etf',
     'epf',
     'needle',
+    'inventory',
     'production',
     'quality',
     'quotations',
@@ -132,6 +140,7 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'dashboard',
     'employees',
     'needle',
+    'inventory',
     'production',
     'quality',
     'quotations',
@@ -145,8 +154,9 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'etf',
     'epf',
     'needle',
+    'inventory',
   ],
-  PRODUCTION_MANAGER: ['dashboard', 'production', 'quotations'],
+  PRODUCTION_MANAGER: ['dashboard', 'inventory', 'production', 'quotations'],
   QUALITY_MANAGER: ['dashboard', 'quality'],
 };
 
@@ -160,6 +170,12 @@ export function resolveAllowedModules(
   if (Array.isArray(customModules) && customModules.length > 0) {
     const validIds = new Set<string>(ALL_ERP_MODULES.map((m) => m.id));
     const filtered = customModules.filter((m): m is ErpModuleId => validIds.has(m));
+    if (
+      (filtered.includes('needle') || filtered.includes('production')) &&
+      !filtered.includes('inventory')
+    ) {
+      filtered.push('inventory');
+    }
     if (filtered.length > 0) return filtered;
   }
   return ROLE_DEFAULT_MODULES[role] || ['dashboard'];

@@ -5,8 +5,40 @@ import { supabaseAdmin, formatSupabaseError } from '@/lib/supabase/admin';
 import { checkErpSessionAction, requestPasswordResetAction } from '@/actions/auth';
 import { recordAuditLog } from '@/lib/audit';
 import { resolveAllowedModules, type ErpModuleId } from '@/lib/rbac';
+import { payrollRepository } from '@/modules/payroll/repositories/payroll-repository';
 import type { UserRole } from '@/db/schema/users';
 import { revalidatePath } from 'next/cache';
+
+export type ApprovalRequestKind =
+  | 'PAYROLL_EDIT'
+  | 'INVOICE_EDIT'
+  | 'INVOICE_DELETE';
+
+export type ApprovalRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface ErpApprovalRequestEntity {
+  id: string;
+  requestKind: ApprovalRequestKind;
+  status: ApprovalRequestStatus;
+  targetId: string;
+  targetLabel: string;
+  amountLabel: string;
+  reason: string;
+  requestedByName: string;
+  requestedByEmail: string;
+  requestedByRole: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
+  adminNote: string | null;
+  employeeId?: string;
+  epfNo?: number;
+  employeeName?: string;
+  month?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  customerName?: string;
+}
 
 export interface ErpUserAccountEntity {
   id: string;
@@ -64,9 +96,46 @@ function mapAuditLog(row: Record<string, unknown>): ErpAuditLogEntity {
   };
 }
 
+function mapApprovalRequest(row: Record<string, unknown>): ErpApprovalRequestEntity {
+  const meta =
+    row.metadata && typeof row.metadata === 'object'
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const rawAction = String(row.action || meta.status || 'PENDING').toUpperCase();
+  const status: ApprovalRequestStatus =
+    rawAction === 'APPROVED' || rawAction === 'REJECTED' ? rawAction : 'PENDING';
+  const rawKind = String(meta.requestKind || 'INVOICE_EDIT');
+  const requestKind: ApprovalRequestKind =
+    rawKind === 'PAYROLL_EDIT' || rawKind === 'INVOICE_DELETE' ? rawKind : 'INVOICE_EDIT';
+
+  return {
+    id: String(row.id),
+    requestKind,
+    status,
+    targetId: String(meta.targetId || ''),
+    targetLabel: String(meta.targetLabel || row.summary || ''),
+    amountLabel: String(meta.amountLabel || ''),
+    reason: String(meta.reason || ''),
+    requestedByName: String(row.actor_name || meta.requestedByName || 'System User'),
+    requestedByEmail: String(row.actor_email || meta.requestedByEmail || ''),
+    requestedByRole: String(row.actor_role || meta.requestedByRole || ''),
+    createdAt: String(row.created_at || ''),
+    resolvedAt: meta.resolvedAt ? String(meta.resolvedAt) : null,
+    resolvedByName: meta.resolvedByName ? String(meta.resolvedByName) : null,
+    adminNote: meta.adminNote ? String(meta.adminNote) : null,
+    employeeId: meta.employeeId ? String(meta.employeeId) : undefined,
+    epfNo: typeof meta.epfNo === 'number' ? meta.epfNo : undefined,
+    employeeName: meta.employeeName ? String(meta.employeeName) : undefined,
+    month: meta.month ? String(meta.month) : undefined,
+    invoiceId: meta.invoiceId ? String(meta.invoiceId) : undefined,
+    invoiceNumber: meta.invoiceNumber ? String(meta.invoiceNumber) : undefined,
+    customerName: meta.customerName ? String(meta.customerName) : undefined,
+  };
+}
+
 async function requireSuperAdmin() {
   const session = await checkErpSessionAction();
-  if (!session.authenticated || session.role !== 'SUPER_ADMIN') {
+  if (!session.authenticated || (session.role !== 'SUPER_ADMIN' && session.role !== 'CEO')) {
     return { ok: false as const, session };
   }
   return { ok: true as const, session };
@@ -76,20 +145,28 @@ export async function fetchAdminUsersAndLogsAction(): Promise<{
   success: boolean;
   users?: ErpUserAccountEntity[];
   logs?: ErpAuditLogEntity[];
+  requests?: ErpApprovalRequestEntity[];
   error?: string;
 }> {
   const guard = await requireSuperAdmin();
   if (!guard.ok) {
-    return { success: false, error: 'Super Admin access required.' };
+    return { success: false, error: 'Admin access required.' };
   }
 
-  const [usersRes, logsRes] = await Promise.all([
+  const [usersRes, logsRes, reqRes] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('*').order('created_at', { ascending: false }),
     supabaseAdmin
       .from('erp_audit_logs')
       .select('*')
+      .neq('module', 'APPROVAL_REQUEST')
       .order('created_at', { ascending: false })
       .limit(250),
+    supabaseAdmin
+      .from('erp_audit_logs')
+      .select('*')
+      .eq('module', 'APPROVAL_REQUEST')
+      .order('created_at', { ascending: false })
+      .limit(200),
   ]);
 
   if (usersRes.error) {
@@ -103,6 +180,7 @@ export async function fetchAdminUsersAndLogsAction(): Promise<{
     success: true,
     users: (usersRes.data || []).map((r) => mapUserProfile(r)),
     logs: (logsRes.data || []).map((r) => mapAuditLog(r)),
+    requests: (reqRes.data || []).map((r) => mapApprovalRequest(r)),
   };
 }
 
@@ -332,4 +410,228 @@ export async function logClientAuditAction(input: {
     action: input.action,
     summary: input.summary,
   });
+}
+
+export async function fetchApprovalRequestsAction(): Promise<{
+  success: boolean;
+  requests?: ErpApprovalRequestEntity[];
+  error?: string;
+}> {
+  const session = await checkErpSessionAction();
+  if (!session.authenticated) {
+    return { success: false, error: 'Authentication required.' };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('erp_audit_logs')
+    .select('*')
+    .eq('module', 'APPROVAL_REQUEST')
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    return { success: false, error: formatSupabaseError(error) };
+  }
+
+  return {
+    success: true,
+    requests: (data || []).map((r) => mapApprovalRequest(r)),
+  };
+}
+
+export async function submitApprovalRequestAction(input: {
+  requestKind: ApprovalRequestKind;
+  targetId: string;
+  targetLabel: string;
+  amountLabel: string;
+  reason: string;
+  employeeId?: string;
+  epfNo?: number;
+  employeeName?: string;
+  month?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  customerName?: string;
+}): Promise<{
+  success: boolean;
+  request?: ErpApprovalRequestEntity;
+  error?: string;
+}> {
+  const session = await checkErpSessionAction();
+  if (!session.authenticated) {
+    return { success: false, error: 'Authentication required.' };
+  }
+
+  const reasonTrim = (input.reason || '').trim();
+  if (reasonTrim.length < 3) {
+    return {
+      success: false,
+      error: 'Please provide a clear reason (at least 3 characters) for Admin review.',
+    };
+  }
+
+  const kindLabel =
+    input.requestKind === 'PAYROLL_EDIT'
+      ? 'Edit Paid Payroll'
+      : input.requestKind === 'INVOICE_DELETE'
+        ? 'Delete Paid Invoice'
+        : 'Update Paid Invoice';
+
+  const summary = `[${kindLabel}] ${input.targetLabel} (${input.amountLabel}) — Reason: ${reasonTrim}`;
+
+  const metadata = {
+    requestKind: input.requestKind,
+    status: 'PENDING' as ApprovalRequestStatus,
+    targetId: input.targetId,
+    targetLabel: input.targetLabel,
+    amountLabel: input.amountLabel,
+    reason: reasonTrim,
+    requestedByName: session.userLabel || 'ERP User',
+    requestedByEmail: session.email || '',
+    requestedByRole: session.role || '',
+    employeeId: input.employeeId,
+    epfNo: input.epfNo,
+    employeeName: input.employeeName,
+    month: input.month,
+    invoiceId: input.invoiceId,
+    invoiceNumber: input.invoiceNumber,
+    customerName: input.customerName,
+    resolvedAt: null,
+    resolvedByName: null,
+    adminNote: null,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('erp_audit_logs')
+    .insert({
+      actor_user_id: session.userId || null,
+      actor_email: session.email || null,
+      actor_name: session.userLabel || 'ERP User',
+      actor_role: session.role || null,
+      module: 'APPROVAL_REQUEST',
+      action: 'PENDING',
+      summary,
+      metadata,
+    })
+    .select('*')
+    .single();
+
+  if (error || !data) {
+    return {
+      success: false,
+      error: error ? formatSupabaseError(error) : 'Failed to submit approval request.',
+    };
+  }
+
+  await recordAuditLog({
+    module: input.requestKind === 'PAYROLL_EDIT' ? 'Payroll' : 'Invoices & Billing',
+    action: 'REQUEST_ADMIN_APPROVAL',
+    summary: `Submitted request to Admin: ${summary}`,
+  });
+
+  revalidatePath('/erp');
+  return {
+    success: true,
+    request: mapApprovalRequest(data),
+  };
+}
+
+export async function resolveApprovalRequestAction(input: {
+  requestId: string;
+  decision: 'APPROVED' | 'REJECTED';
+  adminNote?: string;
+}): Promise<{
+  success: boolean;
+  request?: ErpApprovalRequestEntity;
+  error?: string;
+}> {
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) {
+    return { success: false, error: 'Admin access required to approve or reject requests.' };
+  }
+
+  const { data: existingRow, error: fetchErr } = await supabaseAdmin
+    .from('erp_audit_logs')
+    .select('*')
+    .eq('id', input.requestId)
+    .single();
+
+  if (fetchErr || !existingRow) {
+    return {
+      success: false,
+      error: fetchErr ? formatSupabaseError(fetchErr) : 'Approval request not found.',
+    };
+  }
+
+  const parsed = mapApprovalRequest(existingRow);
+
+  // Execute underlying unlock / delete action when APPROVED
+  if (input.decision === 'APPROVED') {
+    if (parsed.requestKind === 'PAYROLL_EDIT' && parsed.employeeId && parsed.month) {
+      try {
+        await payrollRepository.updateRecordStatus(
+          parsed.employeeId,
+          parsed.month,
+          'APPROVED'
+        );
+      } catch (err) {
+        return {
+          success: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to unlock paid salary record in database.',
+        };
+      }
+    } else if (
+      parsed.requestKind === 'INVOICE_DELETE' &&
+      parsed.invoiceId &&
+      !parsed.invoiceId.startsWith('local-')
+    ) {
+      await supabaseAdmin.from('billing_invoices').delete().eq('id', parsed.invoiceId);
+    }
+  }
+
+  const prevMeta =
+    existingRow.metadata && typeof existingRow.metadata === 'object'
+      ? (existingRow.metadata as Record<string, unknown>)
+      : {};
+
+  const updatedMeta = {
+    ...prevMeta,
+    status: input.decision,
+    resolvedAt: new Date().toISOString(),
+    resolvedByName: guard.session.userLabel || guard.session.email || 'Super Admin',
+    adminNote: (input.adminNote || '').trim() || null,
+  };
+
+  const { data: updatedRow, error: updErr } = await supabaseAdmin
+    .from('erp_audit_logs')
+    .update({
+      action: input.decision,
+      metadata: updatedMeta,
+    })
+    .eq('id', input.requestId)
+    .select('*')
+    .single();
+
+  if (updErr || !updatedRow) {
+    return {
+      success: false,
+      error: updErr ? formatSupabaseError(updErr) : 'Failed to update approval request.',
+    };
+  }
+
+  await recordAuditLog({
+    module: 'Admin Approvals',
+    action: input.decision === 'APPROVED' ? 'APPROVE_REQUEST' : 'REJECT_REQUEST',
+    summary: `Admin ${input.decision.toLowerCase()} request: ${parsed.targetLabel} (${parsed.requestKind}).`,
+  });
+
+  revalidatePath('/erp');
+  revalidatePath('/payroll');
+  return {
+    success: true,
+    request: mapApprovalRequest(updatedRow),
+  };
 }

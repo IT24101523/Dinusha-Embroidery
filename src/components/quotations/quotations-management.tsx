@@ -23,10 +23,18 @@ import {
 } from '@/actions/billing';
 import { saveCompanyAction, type ProductionBundle } from '@/actions/production';
 import type { QualityBundle } from '@/actions/quality';
+import {
+  submitApprovalRequestAction,
+  fetchApprovalRequestsAction,
+  type ErpApprovalRequestEntity,
+} from '@/actions/admin-users';
+import { LOCAL_APPROVAL_REQUESTS_KEY } from '@/components/admin/admin-user-management';
 import { DocumentPreviewModal } from './invoice-pdf-preview';
 import {
   AlertCircle,
   ArrowRight,
+  CheckCircle2,
+  Clock,
   Cloud,
   Eye,
   FileCheck2,
@@ -35,11 +43,15 @@ import {
   FileText,
   HardDrive,
   Layers,
+  Lock,
   Mail,
   Package,
+  Pencil,
   Plus,
   Search,
+  ShieldAlert,
   Trash2,
+  Unlock,
   UserPlus,
   Users,
   X,
@@ -52,6 +64,7 @@ interface QuotationsManagementProps {
   productionBundle?: ProductionBundle;
   qualityBundle?: QualityBundle;
   externalSubTab?: BillingWorkspaceTab;
+  userRole?: string | null;
   onOpenCustomerRegistration?: () => void;
 }
 
@@ -222,30 +235,113 @@ export function QuotationsManagement({
   const [savingWeb, setSavingWeb] = useState(false);
 
   const editorDialogRef = useRef<HTMLDialogElement>(null);
+  const paidReqDialogRef = useRef<HTMLDialogElement>(null);
+
+  // Admin Approval Requests state for Paid Invoices
+  const [approvalRequests, setApprovalRequests] = useState<ErpApprovalRequestEntity[]>([]);
+  const [paidInvoiceRequestTarget, setPaidInvoiceRequestTarget] = useState<{
+    inv: BillingInvoice;
+    actionType: 'INVOICE_EDIT' | 'INVOICE_DELETE';
+  } | null>(null);
+  const [paidInvoiceRequestReason, setPaidInvoiceRequestReason] = useState('');
+  const [paidInvoiceReqError, setPaidInvoiceReqError] = useState<string | null>(null);
+  const [submittingApprovalReq, setSubmittingApprovalReq] = useState(false);
+
+  const isInvoicePaid = (inv: BillingInvoice): boolean => {
+    return (
+      inv.status === 'PAID' ||
+      (Number(inv.totalAmount) > 0 && Number(inv.balanceDue) <= 0)
+    );
+  };
+
+  const hasApprovedInvoiceEdit = (inv: BillingInvoice): boolean => {
+    return approvalRequests.some(
+      (r) =>
+        r.requestKind === 'INVOICE_EDIT' &&
+        r.status === 'APPROVED' &&
+        (r.invoiceId === inv.id || r.invoiceNumber === inv.invoiceNumber)
+    );
+  };
+
+  const getPendingInvoiceRequest = (
+    inv: BillingInvoice
+  ): ErpApprovalRequestEntity | undefined => {
+    return approvalRequests.find(
+      (r) =>
+        (r.requestKind === 'INVOICE_EDIT' || r.requestKind === 'INVOICE_DELETE') &&
+        r.status === 'PENDING' &&
+        (r.invoiceId === inv.id || r.invoiceNumber === inv.invoiceNumber)
+    );
+  };
+
+  useEffect(() => {
+    const dlg = paidReqDialogRef.current;
+    if (!dlg) return;
+    dlg.setAttribute('closedby', 'any');
+    if (paidInvoiceRequestTarget && !dlg.open) {
+      dlg.showModal();
+    } else if (!paidInvoiceRequestTarget && dlg.open) {
+      dlg.close();
+    }
+  }, [paidInvoiceRequestTarget]);
 
   const notify = (text: string, tone: 'ok' | 'err' = 'ok') => {
     setToastMsg({ text, tone });
     setTimeout(() => setToastMsg(null), 3200);
   };
 
-  // Load initial billing bundle
+  // Load initial billing bundle + approval requests
   useEffect(() => {
     let active = true;
     async function load() {
-      const res = await fetchBillingBundleAction();
+      const [res, reqRes] = await Promise.all([
+        fetchBillingBundleAction(),
+        fetchApprovalRequestsAction().catch(() => ({ success: false, requests: [] })),
+      ]);
       if (!active) return;
+
+      const localReqs = safeReadLocal<ErpApprovalRequestEntity[]>(
+        LOCAL_APPROVAL_REQUESTS_KEY,
+        []
+      );
+      const reqMap = new Map<string, ErpApprovalRequestEntity>();
+      (reqRes.requests || []).forEach((r) => reqMap.set(r.id, r));
+      localReqs.forEach((r) => {
+        if (!reqMap.has(r.id)) reqMap.set(r.id, r);
+      });
+      const mergedReqs = Array.from(reqMap.values());
+      setApprovalRequests(mergedReqs);
+
+      const approvedDeleteIds = new Set(
+        mergedReqs
+          .filter((r) => r.requestKind === 'INVOICE_DELETE' && r.status === 'APPROVED')
+          .flatMap((r) => [r.invoiceId || '', r.invoiceNumber || ''])
+          .filter(Boolean)
+      );
+
       if (res.success && res.data && res.data.cloudReady) {
         setCloudReady(true);
         setCustomCustomers(res.data.customers);
         setCustomItems(res.data.items);
         setQuotes(res.data.quotes);
-        setInvoices(res.data.invoices);
+        setInvoices(
+          res.data.invoices.filter(
+            (inv) =>
+              !approvedDeleteIds.has(inv.id) && !approvedDeleteIds.has(inv.invoiceNumber)
+          )
+        );
       } else {
         setCloudReady(false);
         setCustomCustomers(safeReadLocal(STORAGE_KEYS.customers, []));
         setCustomItems(safeReadLocal(STORAGE_KEYS.items, []));
         setQuotes(safeReadLocal(STORAGE_KEYS.quotes, []));
-        setInvoices(safeReadLocal(STORAGE_KEYS.invoices, []));
+        const storedInvs = safeReadLocal<BillingInvoice[]>(STORAGE_KEYS.invoices, []);
+        setInvoices(
+          storedInvs.filter(
+            (inv) =>
+              !approvedDeleteIds.has(inv.id) && !approvedDeleteIds.has(inv.invoiceNumber)
+          )
+        );
       }
       setLoading(false);
     }
@@ -590,6 +686,13 @@ export function QuotationsManagement({
   };
 
   const openEditInvoice = (inv: BillingInvoice) => {
+    if (isInvoicePaid(inv) && !hasApprovedInvoiceEdit(inv)) {
+      setPreviewDoc(null);
+      setPaidInvoiceReqError(null);
+      setPaidInvoiceRequestReason('');
+      setPaidInvoiceRequestTarget({ inv, actionType: 'INVOICE_EDIT' });
+      return;
+    }
     setPreviewDoc(null);
     setEditorError(null);
     setEditorKind('INVOICE');
@@ -926,9 +1029,86 @@ export function QuotationsManagement({
   };
 
   const handleDeleteInvoice = async (inv: BillingInvoice) => {
+    if (isInvoicePaid(inv)) {
+      setPreviewDoc(null);
+      setPaidInvoiceReqError(null);
+      setPaidInvoiceRequestReason('');
+      setPaidInvoiceRequestTarget({ inv, actionType: 'INVOICE_DELETE' });
+      return;
+    }
     setInvoices((prev) => prev.filter((i) => i.id !== inv.id));
     await deleteBillingDocumentAction('billing_invoices', inv.id);
     notify(`Deleted invoice ${inv.invoiceNumber}`);
+  };
+
+  const handleSubmitPaidInvoiceApprovalRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paidInvoiceRequestTarget) return;
+    const { inv, actionType } = paidInvoiceRequestTarget;
+    const reasonTrim = paidInvoiceRequestReason.trim();
+    if (reasonTrim.length < 3) {
+      setPaidInvoiceReqError('Please enter a reason (at least 3 characters) for Admin review.');
+      return;
+    }
+
+    setPaidInvoiceReqError(null);
+    setSubmittingApprovalReq(true);
+
+    const targetLabel = `${inv.invoiceNumber} — ${inv.customerName}`;
+    const amountLabel = formatLKR(inv.totalAmount);
+
+    const res = await submitApprovalRequestAction({
+      requestKind: actionType,
+      targetId: inv.id,
+      targetLabel,
+      amountLabel,
+      reason: reasonTrim,
+      invoiceId: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      customerName: inv.customerName,
+    });
+
+    setSubmittingApprovalReq(false);
+
+    const createdReq: ErpApprovalRequestEntity = res.request || {
+      id: `local-req-${Date.now()}`,
+      requestKind: actionType,
+      status: 'PENDING',
+      targetId: inv.id,
+      targetLabel,
+      amountLabel,
+      reason: reasonTrim,
+      requestedByName: 'Billing User',
+      requestedByEmail: '',
+      requestedByRole: '',
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+      resolvedByName: null,
+      adminNote: null,
+      invoiceId: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      customerName: inv.customerName,
+    };
+
+    setApprovalRequests((prev) => {
+      const next = [createdReq, ...prev.filter((r) => r.id !== createdReq.id)];
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(LOCAL_APPROVAL_REQUESTS_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    });
+
+    setPaidInvoiceRequestTarget(null);
+    setPaidInvoiceRequestReason('');
+    notify(
+      `Request to ${
+        actionType === 'INVOICE_DELETE' ? 'delete' : 'update'
+      } Paid Invoice ${inv.invoiceNumber} sent to Admin Approval Requests tab!`
+    );
   };
 
   const handleDeleteQuote = async (qt: BillingQuote) => {
@@ -1295,10 +1475,22 @@ export function QuotationsManagement({
                             )}
                           </td>
                           <td className="p-3.5">
-                            {inv.balanceDue <= 0 && inv.totalAmount > 0 ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">
-                                PAID
-                              </span>
+                            {isInvoicePaid(inv) ? (
+                              <div className="inline-flex flex-wrap items-center gap-1">
+                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10px] inline-flex items-center gap-1">
+                                  <Lock className="w-2.5 h-2.5" /> PAID &amp; LOCKED
+                                </span>
+                                {hasApprovedInvoiceEdit(inv) && (
+                                  <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-extrabold text-[10px] inline-flex items-center gap-1">
+                                    <Unlock className="w-2.5 h-2.5" /> Edit Approved
+                                  </span>
+                                )}
+                                {getPendingInvoiceRequest(inv) && (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-extrabold text-[10px] inline-flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5" /> Pending Admin
+                                  </span>
+                                )}
+                              </div>
                             ) : overdueDays > 0 ? (
                               <span className="px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 font-extrabold text-[10px]">
                                 OVERDUE BY {overdueDays} DAYS
@@ -1335,7 +1527,40 @@ export function QuotationsManagement({
                               </button>
                               <button
                                 type="button"
-                                aria-label="Delete invoice"
+                                title={
+                                  isInvoicePaid(inv) && !hasApprovedInvoiceEdit(inv)
+                                    ? 'Request Admin Approval to Edit Paid Invoice'
+                                    : 'Edit Invoice'
+                                }
+                                onClick={() => openEditInvoice(inv)}
+                                className={`px-2 py-1 rounded-lg font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer ${
+                                  isInvoicePaid(inv) && !hasApprovedInvoiceEdit(inv)
+                                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-slate-100 hover:bg-indigo-100 text-slate-700 hover:text-indigo-800'
+                                }`}
+                              >
+                                {isInvoicePaid(inv) && !hasApprovedInvoiceEdit(inv) ? (
+                                  <>
+                                    <Lock className="w-3 h-3" /> Request Edit
+                                  </>
+                                ) : (
+                                  <>
+                                    <Pencil className="w-3 h-3" /> Edit
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={
+                                  isInvoicePaid(inv)
+                                    ? 'Request Admin Approval to Delete Paid Invoice'
+                                    : 'Delete invoice'
+                                }
+                                title={
+                                  isInvoicePaid(inv)
+                                    ? 'Request Admin Approval to Delete Paid Invoice'
+                                    : 'Delete Invoice'
+                                }
                                 onClick={() => handleDeleteInvoice(inv)}
                                 className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
                               >
@@ -2487,6 +2712,12 @@ export function QuotationsManagement({
       {/* DOCUMENT VIEWER & PDF DOWNLOAD MODAL */}
       <DocumentPreviewModal
         doc={previewDoc}
+        isPaidLocked={
+          previewDoc?.kind === 'INVOICE' ? isInvoicePaid(previewDoc.data) : false
+        }
+        isEditApproved={
+          previewDoc?.kind === 'INVOICE' ? hasApprovedInvoiceEdit(previewDoc.data) : false
+        }
         onClose={() => setPreviewDoc(null)}
         onEdit={() => {
           if (!previewDoc) return;
@@ -2499,6 +2730,158 @@ export function QuotationsManagement({
         }}
         onRecordPayment={handleRecordInvoicePayment}
       />
+
+      {/* PAID INVOICE ADMIN APPROVAL REQUEST MODAL */}
+      <dialog
+        ref={paidReqDialogRef}
+        aria-labelledby="paid-inv-req-title"
+        onClose={() => setPaidInvoiceRequestTarget(null)}
+        className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-amber-200/90 bg-white p-0 shadow-2xl text-slate-900 backdrop:bg-slate-950/60 backdrop:backdrop-blur-xs"
+      >
+        {paidInvoiceRequestTarget && (
+          <form
+            onSubmit={handleSubmitPaidInvoiceApprovalRequest}
+            className="flex flex-col overflow-hidden rounded-2xl"
+          >
+            <div className="bg-gradient-to-r from-slate-900 via-amber-950 to-slate-900 text-white p-5 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/35 text-amber-300 flex items-center justify-center shrink-0">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="paid-inv-req-title" className="text-base font-bold text-white">
+                    Paid Invoice Locked — Admin Approval Required
+                  </h3>
+                  <p className="text-xs text-amber-200/90 mt-0.5">
+                    Paid invoices cannot be modified or deleted without Admin approval
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaidInvoiceRequestTarget(null)}
+                aria-label="Close approval request dialog"
+                className="p-1.5 rounded-lg text-slate-300 hover:bg-white/15 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-800">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">
+                    PAID INVOICE
+                  </span>
+                  <span className="font-mono text-slate-500">
+                    {paidInvoiceRequestTarget.inv.invoiceDate}
+                  </span>
+                </div>
+                <div className="text-sm font-black text-slate-900">
+                  {paidInvoiceRequestTarget.inv.invoiceNumber} —{' '}
+                  {paidInvoiceRequestTarget.inv.customerName}
+                </div>
+                <div className="font-mono font-bold text-emerald-700">
+                  Paid Amount: {formatLKR(paidInvoiceRequestTarget.inv.totalAmount)}
+                </div>
+              </div>
+
+              {getPendingInvoiceRequest(paidInvoiceRequestTarget.inv) && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-semibold">
+                  ⏳ A request for this invoice is already <strong>PENDING</strong> in the Admin&apos;s{' '}
+                  <strong>Approval Requests</strong> tab.
+                </div>
+              )}
+
+              <div>
+                <span className="block font-bold text-slate-700 mb-1.5">
+                  Requested Action *
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaidInvoiceRequestTarget((prev) =>
+                        prev ? { ...prev, actionType: 'INVOICE_EDIT' } : null
+                      )
+                    }
+                    className={`py-2 px-3 rounded-xl font-bold border transition cursor-pointer ${
+                      paidInvoiceRequestTarget.actionType === 'INVOICE_EDIT'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Unlock to Update / Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaidInvoiceRequestTarget((prev) =>
+                        prev ? { ...prev, actionType: 'INVOICE_DELETE' } : null
+                      )
+                    }
+                    className={`py-2 px-3 rounded-xl font-bold border transition cursor-pointer ${
+                      paidInvoiceRequestTarget.actionType === 'INVOICE_DELETE'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Delete Paid Invoice
+                  </button>
+                </div>
+              </div>
+
+              {paidInvoiceReqError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-2 font-semibold">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{paidInvoiceReqError}</span>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="paid-inv-req-reason"
+                  className="block font-bold text-slate-700 mb-1"
+                >
+                  Reason for Admin Approval Request *
+                </label>
+                <textarea
+                  id="paid-inv-req-reason"
+                  rows={3}
+                  required
+                  value={paidInvoiceRequestReason}
+                  onChange={(e) => {
+                    setPaidInvoiceRequestReason(e.target.value);
+                    setPaidInvoiceReqError(null);
+                  }}
+                  placeholder="Explain why this PAID invoice needs to be updated or deleted..."
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs outline-none focus:border-amber-600"
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border-t border-slate-200 px-5 py-3.5 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setPaidInvoiceRequestTarget(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submittingApprovalReq}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer disabled:opacity-50"
+              >
+                {submittingApprovalReq
+                  ? 'Sending Request...'
+                  : 'Send Request to Admin Approval Tab'}
+              </button>
+            </div>
+          </form>
+        )}
+      </dialog>
 
       {/* TOAST NOTIFICATION */}
       {toastMsg && (
