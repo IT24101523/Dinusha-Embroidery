@@ -241,12 +241,17 @@ export const monthlySalaryInputSchema = z.object({
   lateHours: z.coerce
     .number()
     .min(0, 'Late hours cannot be negative')
-    .max(200, 'Late hours cannot exceed 200 hrs/month')
+    .max(208, 'Late hours cannot exceed 208 hrs/month')
+    .default(0),
+  annualLeaveDays: z.coerce
+    .number()
+    .min(0, 'Annual leave days cannot be negative')
+    .max(14, 'Annual leave cannot exceed 14 days per year — enter excess leave under Unpaid Leave')
     .default(0),
   unpaidDays: z.coerce
     .number()
     .min(0, 'Unpaid days cannot be negative')
-    .max(25, 'Unpaid days cannot exceed 25 working days (200 hours)')
+    .max(26, 'Unpaid days cannot exceed 26 working days (208 hours)')
     .default(0),
   advance: z.coerce
     .number()

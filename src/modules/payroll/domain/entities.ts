@@ -52,7 +52,8 @@ export interface MonthlySalaryInput {
   // Special Incentives
   prodAllow?: number; // Production allowance
   checkingAllow?: number; // Trimmer/Checker allowance
-  // Deductions
+  // Deductions & Leave
+  annualLeaveDays?: number; // Paid annual leave (max 14 days/year; reduces Attendance Allowance)
   lateHours?: number;
   unpaidDays?: number;
   advance?: number;
@@ -96,8 +97,9 @@ export interface PayrollCalculationBreakdown {
   // Employer contributions
   epf12: number;
   etf3: number;
-  // Deductions
+  // Deductions & Leave
   epf8: number;
+  annualLeaveDays?: number;
   lateHours: number;
   lateDeduction: number;
   unpaidDays: number;

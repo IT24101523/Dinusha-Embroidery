@@ -83,7 +83,10 @@ export function generateEpfEtfData(
       const rec = recordsMap[emp.id];
 
       const basicEarnings = rec
-        ? Math.max(0, Number((rec.basic - rec.unpaidDeduction).toFixed(2)))
+        ? Math.max(
+            0,
+            Number((rec.basic - rec.unpaidDeduction - rec.lateDeduction).toFixed(2))
+          )
         : emp.basicSalary;
       const grossEarnings = rec ? rec.gross : emp.basicSalary;
       const epf8 = rec ? rec.epf8 : Number((basicEarnings * 0.08).toFixed(2));
@@ -91,9 +94,9 @@ export function generateEpfEtfData(
       const totalEpf20 = Number((epf8 + epf12).toFixed(2));
       const etf3 = rec ? rec.etf3 : Number((basicEarnings * 0.03).toFixed(2));
 
-      // Calculate days worked (standard 25 minus unpaid days)
+      // Calculate days worked (standard 26 minus unpaid days)
       const unpaidDays = rec ? rec.unpaidDays : 0;
-      const daysWorked = Math.max(0, Number((25 - unpaidDays).toFixed(2)));
+      const daysWorked = Math.max(0, Number((26 - unpaidDays).toFixed(2)));
 
       // Check if employee joined this year/month -> 'N' for New, else 'E' for Existing
       const isNew = emp.joinedDate ? emp.joinedDate.startsWith('2026') : false;

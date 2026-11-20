@@ -159,6 +159,7 @@ export async function fetchAdminUsersAndLogsAction(): Promise<{
       .from('erp_audit_logs')
       .select('*')
       .neq('module', 'APPROVAL_REQUEST')
+      .neq('module', 'EMPLOYEE_ANNUAL_LEAVE')
       .order('created_at', { ascending: false })
       .limit(250),
     supabaseAdmin

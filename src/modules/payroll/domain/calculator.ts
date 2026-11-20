@@ -1,7 +1,8 @@
 import { MonthlySalaryInput, PayrollCalculationBreakdown, EmployeeEntity } from './entities';
 
-export const STANDARD_MONTH_HOURS = 200;
-export const STANDARD_MONTH_DAYS = 25;
+export const STANDARD_MONTH_HOURS = 200; // OT hourly divisor (Basic / 200)
+export const STANDARD_MONTH_DAYS = 26; // Unpaid leave daily divisor (Basic / 26)
+export const STANDARD_DEDUCTION_MONTH_HOURS = 208; // Unpaid/Late hourly divisor (26 days * 8 hrs = 208)
 export const NORMAL_OT_MULTIPLIER = 1.5;
 export const SUNDAY_OT_MULTIPLIER = 2.0;
 export const EPF_EMPLOYEE_RATE = 0.08; // 8%
@@ -9,17 +10,27 @@ export const EPF_EMPLOYER_RATE = 0.12; // 12%
 export const ETF_EMPLOYER_RATE = 0.03; // 3%
 export const FULL_ATTENDANCE_ALLOWANCE = 5000;
 export const ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE = 2500;
+export const ANNUAL_LEAVE_QUOTA_DAYS = 14;
 
 /**
- * Attendance allowance rule:
- * - 0 unpaid/absent days: LKR 5,000
- * - > 0 and <= 1 unpaid/absent day: LKR 2,500
- * - > 1 unpaid/absent day: LKR 0
+ * Attendance allowance rule (total absent/leave days = unpaidDays + annualLeaveDays + lateHours / 8):
+ * - <= 1 day: LKR 5,000 (Full)
+ * - > 1 day and <= 2 days: LKR 2,500 (Half)
+ * - > 2 days: LKR 0 (None)
  */
-export function calculateAttendanceAllowance(unpaidDays: number): number {
-  const days = Math.max(0, Number(unpaidDays) || 0);
-  if (days === 0) return FULL_ATTENDANCE_ALLOWANCE;
-  if (days <= 1) return ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE;
+export function calculateAttendanceAllowance(
+  unpaidDays: number,
+  annualLeaveDays = 0,
+  lateHours = 0
+): number {
+  const days = Math.max(
+    0,
+    (Number(unpaidDays) || 0) +
+      (Number(annualLeaveDays) || 0) +
+      (Number(lateHours) || 0) / 8
+  );
+  if (days <= 1) return FULL_ATTENDANCE_ALLOWANCE;
+  if (days <= 2) return ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE;
   return 0;
 }
 
@@ -28,17 +39,23 @@ export function calculateSalaryForEmployee(
   input: MonthlySalaryInput
 ): PayrollCalculationBreakdown {
   const basic = Math.max(0, Number(employee.basicSalary) || 0);
-  const hourlyRate = basic > 0 ? basic / STANDARD_MONTH_HOURS : 0;
-  const dailyRate = basic > 0 ? basic / STANDARD_MONTH_DAYS : 0;
+  const otHourlyRate = basic > 0 ? basic / STANDARD_MONTH_HOURS : 0;
+  const deductionDailyRate = basic > 0 ? basic / STANDARD_MONTH_DAYS : 0;
+  const deductionHourlyRate = basic > 0 ? basic / STANDARD_DEDUCTION_MONTH_HOURS : 0;
 
+  const annualLeaveDays = Math.max(0, Number(input.annualLeaveDays) || 0);
   const unpaidDays = Math.max(0, Number(input.unpaidDays) || 0);
-  const unpaidDeduction = Number((unpaidDays * dailyRate).toFixed(2));
+  const lateHours = Math.max(0, Number(input.lateHours) || 0);
+  const unpaidDeduction = Number((unpaidDays * deductionDailyRate).toFixed(2));
+  const lateDeduction = Number((lateHours * deductionHourlyRate).toFixed(2));
 
   // If employee has > 6 unpaid/absent days (> 48 hours), lock Allowances and Special Incentives
   const isAllowanceLocked = unpaidDays > 6;
 
-  // Allowances
-  const attAllow = isAllowanceLocked ? 0 : calculateAttendanceAllowance(unpaidDays);
+  // Allowances (Attendance Allowance: <=1d Full 5,000 | >1d to 2d Half 2,500 | >2d 0)
+  const attAllow = isAllowanceLocked
+    ? 0
+    : calculateAttendanceAllowance(unpaidDays, annualLeaveDays, lateHours);
   const nightAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.nightAllow) || 0);
   const gradeAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.gradeAllow) || 0);
   const transAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.transAllow) || 0);
@@ -49,14 +66,16 @@ export function calculateSalaryForEmployee(
   const checkingAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.checkingAllow) || 0);
   const totalSpecialIncentives = Number((prodAllow + checkingAllow).toFixed(2));
 
-  // Overtime
+  // Overtime:
+  // - Normal OT (1.5x): (Basic / 200) * 1.5 * Hours
+  // - Double OT / SOT (2.0x): (Basic / 208) * 2.0 * Hours  [26 working days * 8 hrs]
   const otHours = Math.max(0, Number(input.otHours) || 0);
-  const otRate = Number((hourlyRate * NORMAL_OT_MULTIPLIER).toFixed(2));
-  const otAmt = Number((otHours * otRate).toFixed(2));
+  const otRate = Number((otHourlyRate * NORMAL_OT_MULTIPLIER).toFixed(2));
+  const otAmt = Number((otHourlyRate * NORMAL_OT_MULTIPLIER * otHours).toFixed(2));
 
   const sotHours = Math.max(0, Number(input.sotHours) || 0);
-  const sotRate = Number((hourlyRate * SUNDAY_OT_MULTIPLIER).toFixed(2));
-  const sotAmt = Number((sotHours * sotRate).toFixed(2));
+  const sotRate = Number((deductionHourlyRate * SUNDAY_OT_MULTIPLIER).toFixed(2));
+  const sotAmt = Number((deductionHourlyRate * SUNDAY_OT_MULTIPLIER * sotHours).toFixed(2));
 
   const totAmt = Math.max(0, Number(input.totAmt) || 0);
   const poyaDayAmt = Math.max(0, Number(input.poyaDayAmt) || 0);
@@ -68,16 +87,16 @@ export function calculateSalaryForEmployee(
   // Gross Salary
   const gross = Number((basic + totalAllowances + totalSpecialIncentives + totalOt).toFixed(2));
 
-  // Statutory Employer & Employee Contributions calculated on earned basic (basic minus unpaid deduction)
-  const epfLiableBasic = Math.max(0, Number((basic - unpaidDeduction).toFixed(2)));
+  // Statutory Employer & Employee Contributions calculated on earned basic (basic minus unpaid leave & late/early out deductions)
+  const epfLiableBasic = Math.max(
+    0,
+    Number((basic - unpaidDeduction - lateDeduction).toFixed(2))
+  );
   const epf12 = Number((epfLiableBasic * EPF_EMPLOYER_RATE).toFixed(2));
   const etf3 = Number((epfLiableBasic * ETF_EMPLOYER_RATE).toFixed(2));
 
   // Deductions
   const epf8 = Number((epfLiableBasic * EPF_EMPLOYEE_RATE).toFixed(2));
-
-  const lateHours = Math.max(0, Number(input.lateHours) || 0);
-  const lateDeduction = Number((lateHours * hourlyRate).toFixed(2));
 
   const advance = Math.max(0, Number(input.advance) || 0);
 
@@ -119,6 +138,7 @@ export function calculateSalaryForEmployee(
     epf12,
     etf3,
     epf8,
+    annualLeaveDays,
     lateHours,
     lateDeduction,
     unpaidDays,

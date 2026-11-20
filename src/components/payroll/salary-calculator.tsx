@@ -9,10 +9,12 @@ import {
 import {
   calculateSalaryForEmployee,
   calculateAttendanceAllowance,
+  ANNUAL_LEAVE_QUOTA_DAYS,
 } from '@/modules/payroll/domain/calculator';
 import {
   saveMonthlySalaryAction,
   fetchSalaryRecordAction,
+  fetchEmployeeAnnualLeaveByYearAction,
   updateSalaryPaymentStatusAction,
 } from '@/actions/payroll';
 import {
@@ -26,6 +28,8 @@ import {
   Save,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  CalendarDays,
   Clock,
   DollarSign,
   Gift,
@@ -72,6 +76,17 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [prodAllow, setProdAllow] = useState<number>(0);
   const [checkingAllow, setCheckingAllow] = useState<number>(0);
 
+  const [annualLeaveDays, setAnnualLeaveDays] = useState<number>(0);
+  const [yearLeaveByMonth, setYearLeaveByMonth] = useState<Record<string, number>>({});
+  const [leaveLimitPopup, setLeaveLimitPopup] = useState<{
+    attempted: number;
+    maxAllowed: number;
+    excess: number;
+    usedOtherMonths: number;
+    year: string;
+  } | null>(null);
+  const leaveLimitDialogRef = useRef<HTMLDialogElement | null>(null);
+
   const [lateHours, setLateHours] = useState<number>(0);
   const [unpaidDays, setUnpaidDays] = useState<number>(0);
   const [advance, setAdvance] = useState<number>(0);
@@ -114,15 +129,28 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     setSelectedId(employees[nextIdx].id);
   };
 
-  // Load existing salary record when employee or month changes
+  const selectedYear = useMemo(() => {
+    const m = month.match(/\b(20\d{2})\b/);
+    return m ? m[1] : String(new Date().getFullYear());
+  }, [month]);
+
+  // Load existing salary record & annual leave ledger when employee or month changes
   useEffect(() => {
     if (!currentEmployee) return;
 
     let isMounted = true;
     async function loadExisting() {
       setStatusMsg(null);
-      const res = await fetchSalaryRecordAction(currentEmployee!.id, month);
-      if (isMounted && res.success && res.data) {
+      const [res, leaveRes] = await Promise.all([
+        fetchSalaryRecordAction(currentEmployee!.id, month),
+        fetchEmployeeAnnualLeaveByYearAction(currentEmployee!.id, selectedYear),
+      ]);
+      if (!isMounted) return;
+
+      const leaveMap = leaveRes.success && leaveRes.leaveByMonth ? leaveRes.leaveByMonth : {};
+      setYearLeaveByMonth(leaveMap);
+
+      if (res.success && res.data) {
         const d = res.data;
         setOtHours(d.otHours);
         setSotHours(d.sotHours);
@@ -140,11 +168,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setProdAllow(d.prodAllow);
         setCheckingAllow(d.checkingAllow);
 
+        setAnnualLeaveDays(
+          typeof d.annualLeaveDays === 'number' ? d.annualLeaveDays : leaveMap[month] || 0
+        );
         setLateHours(d.lateHours);
         setUnpaidDays(d.unpaidDays);
         setAdvance(d.advance);
         setRecordStatus((d.status as 'DRAFT' | 'APPROVED' | 'PAID') || 'APPROVED');
-      } else if (isMounted) {
+      } else {
         // Reset to smart defaults for this employee
         setRecordStatus(null);
         setOtHours(0);
@@ -163,6 +194,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         setProdAllow(currentEmployee!.role.includes('Supervisor') ? 20000 : 0);
         setCheckingAllow(0);
 
+        setAnnualLeaveDays(leaveMap[month] || 0);
         setLateHours(0);
         setUnpaidDays(0);
         setAdvance(0);
@@ -185,12 +217,78 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     return () => {
       isMounted = false;
     };
-  }, [currentEmployee, month]);
+  }, [currentEmployee, month, selectedYear]);
+
+  const usedLeaveOtherMonths = useMemo(() => {
+    const sum = Object.entries(yearLeaveByMonth)
+      .filter(([m]) => m !== month)
+      .reduce((acc, [, days]) => acc + (Number(days) || 0), 0);
+    return Number(sum.toFixed(2));
+  }, [yearLeaveByMonth, month]);
+
+  const maxAnnualLeaveThisMonth = Math.max(
+    0,
+    Number((ANNUAL_LEAVE_QUOTA_DAYS - usedLeaveOtherMonths).toFixed(2))
+  );
+  const totalAnnualLeaveUsedThisYear = Number((usedLeaveOtherMonths + annualLeaveDays).toFixed(2));
+  const remainingAnnualLeave = Math.max(
+    0,
+    Number((ANNUAL_LEAVE_QUOTA_DAYS - totalAnnualLeaveUsedThisYear).toFixed(2))
+  );
+  const annualLeavePct = Math.min(
+    100,
+    Math.round((totalAnnualLeaveUsedThisYear / ANNUAL_LEAVE_QUOTA_DAYS) * 100)
+  );
+  const totalLeaveAndAbsentDays = Number(
+    (unpaidDays + annualLeaveDays + lateHours / 8).toFixed(2)
+  );
+
+  const handleAnnualLeaveChange = (rawVal: string | number) => {
+    const str = String(rawVal).trim();
+    if (str === '') {
+      setAnnualLeaveDays(0);
+      return;
+    }
+    const parsed = Number(str);
+    if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) {
+      setAnnualLeaveDays(0);
+      return;
+    }
+    const attempted = Number(parsed.toFixed(2));
+    if (usedLeaveOtherMonths + attempted > ANNUAL_LEAVE_QUOTA_DAYS) {
+      const excess = Number(
+        (usedLeaveOtherMonths + attempted - ANNUAL_LEAVE_QUOTA_DAYS).toFixed(2)
+      );
+      setAnnualLeaveDays(maxAnnualLeaveThisMonth);
+      setLeaveLimitPopup({
+        attempted,
+        maxAllowed: maxAnnualLeaveThisMonth,
+        excess,
+        usedOtherMonths: usedLeaveOtherMonths,
+        year: selectedYear,
+      });
+      return;
+    }
+    setAnnualLeaveDays(attempted);
+  };
+
+  useEffect(() => {
+    const dialog = leaveLimitDialogRef.current;
+    if (!dialog) return;
+    dialog.setAttribute('closedby', 'any');
+    if (leaveLimitPopup && !dialog.open) {
+      dialog.showModal();
+    } else if (!leaveLimitPopup && dialog.open) {
+      dialog.close();
+    }
+  }, [leaveLimitPopup]);
 
   const isPaidLocked = recordStatus === 'PAID';
   const isExistingRecord = recordStatus !== null && recordStatus !== 'PAID';
   const isAllowanceLocked = unpaidDays > 6;
-  const attAllow = isAllowanceLocked ? 0 : calculateAttendanceAllowance(unpaidDays);
+  const attAllow = isAllowanceLocked
+    ? 0
+    : calculateAttendanceAllowance(unpaidDays, annualLeaveDays, lateHours);
   const inputsDisabled = isAllowanceLocked || isPaidLocked;
   const unpaidHours = Number((unpaidDays * 8).toFixed(2));
   const unpaidThresholdPct = Math.min(100, Math.round((unpaidDays / 6) * 100));
@@ -218,6 +316,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       transAllow,
       prodAllow,
       checkingAllow,
+      annualLeaveDays,
       lateHours,
       unpaidDays,
       advance,
@@ -239,6 +338,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     transAllow,
     prodAllow,
     checkingAllow,
+    annualLeaveDays,
     lateHours,
     unpaidDays,
     advance,
@@ -275,10 +375,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       transAllow,
       prodAllow,
       checkingAllow,
+      annualLeaveDays,
       lateHours,
       unpaidDays,
       advance,
     };
+
+    if (usedLeaveOtherMonths + annualLeaveDays > ANNUAL_LEAVE_QUOTA_DAYS) {
+      const excess = Number(
+        (usedLeaveOtherMonths + annualLeaveDays - ANNUAL_LEAVE_QUOTA_DAYS).toFixed(2)
+      );
+      setLeaveLimitPopup({
+        attempted: annualLeaveDays,
+        maxAllowed: maxAnnualLeaveThisMonth,
+        excess,
+        usedOtherMonths: usedLeaveOtherMonths,
+        year: selectedYear,
+      });
+      return null;
+    }
 
     const parsed = monthlySalaryInputSchema.safeParse(inputData);
     if (!parsed.success) {
@@ -347,6 +462,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
     if (res.success && res.breakdown) {
       setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
+      setYearLeaveByMonth((prev) => ({
+        ...prev,
+        [validated.month]: validated.annualLeaveDays || 0,
+      }));
       setPendingUpdateData(null);
       setStatusMsg({
         type: 'success',
@@ -490,6 +609,30 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Yearly Annual Leave Tracker Tile */}
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 rounded-lg px-3 py-1.5 text-[11px]">
+              <CalendarDays className="w-4 h-4 text-amber-300 shrink-0" />
+              <div>
+                <span className="text-[9px] text-slate-300 block uppercase">
+                  Annual Leave ({selectedYear})
+                </span>
+                <span
+                  className={`font-mono font-extrabold ${
+                    totalAnnualLeaveUsedThisYear >= ANNUAL_LEAVE_QUOTA_DAYS
+                      ? 'text-rose-300'
+                      : totalAnnualLeaveUsedThisYear >= 11
+                        ? 'text-amber-300'
+                        : 'text-emerald-300'
+                  }`}
+                >
+                  {totalAnnualLeaveUsedThisYear} / {ANNUAL_LEAVE_QUOTA_DAYS}d{' '}
+                  <span className="text-[10px] font-sans font-semibold text-slate-200">
+                    (Left: {remainingAnnualLeave}d)
+                  </span>
+                </span>
+              </div>
+            </div>
+
             {/* Employer Statutory Preview Tiles */}
             <div className="hidden sm:flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 rounded-lg px-3 py-1.5 text-[11px]">
               <div>
@@ -562,11 +705,21 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               onChange={(e) => setMonth(e.target.value)}
               className="w-full px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
             >
-              <option value="October 2026">October 2026</option>
+              <option value="January 2026">January 2026</option>
+              <option value="February 2026">February 2026</option>
+              <option value="March 2026">March 2026</option>
+              <option value="April 2026">April 2026</option>
+              <option value="May 2026">May 2026</option>
+              <option value="June 2026">June 2026</option>
+              <option value="July 2026">July 2026</option>
+              <option value="August 2026">August 2026</option>
               <option value="September 2026">September 2026</option>
+              <option value="October 2026">October 2026</option>
               <option value="November 2026">November 2026</option>
               <option value="December 2026">December 2026</option>
-              <option value="August 2026">August 2026</option>
+              <option value="January 2027">January 2027</option>
+              <option value="February 2027">February 2027</option>
+              <option value="March 2027">March 2027</option>
             </select>
           </div>
 
@@ -688,7 +841,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 />
                 <div className="flex items-center justify-between mt-1 gap-1">
                   <span className="text-[10px] text-slate-400">
-                    LKR {calculation?.sotRate || 0}/hr
+                    LKR {calculation?.sotRate || 0}/hr (÷208×2)
                   </span>
                   <div className="flex items-center gap-1">
                     <button
@@ -716,6 +869,70 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                       0
                     </button>
                   </div>
+                </div>
+              </div>
+
+              {/* Additional Holiday / Triple OT / Poya / Sunday / Special Leave */}
+              <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                    Triple OT (LKR)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={200000}
+                    step="any"
+                    disabled={isPaidLocked}
+                    value={totAmt}
+                    onChange={(e) => setTotAmt(clampNumber(e.target.value, 0, 200000))}
+                    className="w-full px-2 py-1 text-xs font-mono font-semibold border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                    Poya Day (LKR)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={200000}
+                    step="any"
+                    disabled={isPaidLocked}
+                    value={poyaDayAmt}
+                    onChange={(e) => setPoyaDayAmt(clampNumber(e.target.value, 0, 200000))}
+                    className="w-full px-2 py-1 text-xs font-mono font-semibold border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                    Sunday Pay (LKR)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={200000}
+                    step="any"
+                    disabled={isPaidLocked}
+                    value={sundayAmt}
+                    onChange={(e) => setSundayAmt(clampNumber(e.target.value, 0, 200000))}
+                    className="w-full px-2 py-1 text-xs font-mono font-semibold border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                    Special Leave (LKR)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={200000}
+                    step="any"
+                    disabled={isPaidLocked}
+                    value={specialLeaveAmt}
+                    onChange={(e) => setSpecialLeaveAmt(clampNumber(e.target.value, 0, 200000))}
+                    className="w-full px-2 py-1 text-xs font-mono font-semibold border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  />
                 </div>
               </div>
             </div>
@@ -768,11 +985,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                         : 'bg-rose-100 text-rose-700'
                     }`}
                   >
-                    {unpaidDays === 0
-                      ? '0d Absent • Full'
-                      : unpaidDays <= 1
-                      ? '≤1d Absent • Half'
-                      : '>1d Absent • None'}
+                    {totalLeaveAndAbsentDays <= 1
+                      ? `${totalLeaveAndAbsentDays}d Absent • Full`
+                      : totalLeaveAndAbsentDays <= 2
+                      ? `${totalLeaveAndAbsentDays}d Absent • Half`
+                      : `${totalLeaveAndAbsentDays}d Absent • None`}
                   </span>
                 </div>
                 <div
@@ -786,7 +1003,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 >
                   <span>LKR {attAllow.toLocaleString()}</span>
                   <span className="text-[10px] font-sans font-medium opacity-75">
-                    0d: 5k | 1d: 2.5k | &gt;1d: 0
+                    ≤1d: 5k | &gt;1–2d: 2.5k | &gt;2d: 0
                   </span>
                 </div>
               </div>
@@ -993,7 +1210,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               <div>
                 <div className="flex items-center justify-between mb-0.5">
                   <label className="text-[11px] font-semibold text-slate-700">EPF 8% Statutory</label>
-                  <span className="text-[10px] text-slate-400">8% of Basic</span>
+                  <span className="text-[10px] text-slate-400">8% of (Basic − Late − Unpaid)</span>
                 </div>
                 <div className="px-2.5 py-1.5 bg-rose-50/60 border border-rose-200 rounded-lg text-xs font-mono font-extrabold text-rose-900">
                   LKR {formatLkr2(calculation?.epf8 || 0)}
@@ -1014,13 +1231,104 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 <input
                   type="number"
                   min={0}
-                  max={200}
-                  step={0.5}
+                  max={208}
+                  step="any"
                   disabled={isPaidLocked}
                   value={lateHours}
-                  onChange={(e) => setLateHours(clampNumber(e.target.value, 0, 200))}
+                  onChange={(e) => setLateHours(clampNumber(e.target.value, 0, 208))}
                   className="w-full px-2.5 py-1.5 text-xs font-mono font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
+              </div>
+
+              {/* Annual Leave (14 Days/Year Quota — Reduces Attendance Allowance Only) */}
+              <div className="p-2 rounded-lg bg-indigo-50/60 border border-indigo-200/90 space-y-1.5">
+                <div className="flex items-center justify-between gap-1">
+                  <label
+                    htmlFor="salary-annual-leave-days"
+                    className="text-[11px] font-bold text-indigo-950 flex items-center gap-1"
+                  >
+                    <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
+                    Annual Leave (14d/Yr)
+                  </label>
+                  <span
+                    className={`text-[10px] font-mono font-extrabold px-1.5 py-0.5 rounded ${
+                      totalAnnualLeaveUsedThisYear >= ANNUAL_LEAVE_QUOTA_DAYS
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-indigo-100 text-indigo-800'
+                    }`}
+                  >
+                    {selectedYear}: {totalAnnualLeaveUsedThisYear}/{ANNUAL_LEAVE_QUOTA_DAYS}d
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="salary-annual-leave-days"
+                    type="number"
+                    min={0}
+                    max={ANNUAL_LEAVE_QUOTA_DAYS}
+                    step={0.5}
+                    disabled={isPaidLocked}
+                    value={annualLeaveDays}
+                    onChange={(e) => handleAnnualLeaveChange(e.target.value)}
+                    className="w-20 px-2 py-1 text-xs font-mono font-bold border border-indigo-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  />
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={isPaidLocked}
+                      onClick={() => handleAnnualLeaveChange(annualLeaveDays + 0.5)}
+                      className="px-1.5 py-1 rounded text-[10px] font-bold bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-800 disabled:opacity-40 cursor-pointer"
+                    >
+                      +0.5d
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPaidLocked}
+                      onClick={() => handleAnnualLeaveChange(annualLeaveDays + 1)}
+                      className="px-1.5 py-1 rounded text-[10px] font-bold bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-800 disabled:opacity-40 cursor-pointer"
+                    >
+                      +1d
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPaidLocked}
+                      onClick={() => handleAnnualLeaveChange(0)}
+                      className="px-1.5 py-1 rounded text-[10px] font-bold bg-white hover:bg-rose-100 border border-slate-200 text-slate-500 disabled:opacity-40 cursor-pointer"
+                    >
+                      0
+                    </button>
+                  </div>
+                </div>
+
+                {/* Yearly 14-Day Progress Meter */}
+                <div className="space-y-0.5">
+                  <div className="h-1.5 w-full rounded-full bg-indigo-100 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        totalAnnualLeaveUsedThisYear >= ANNUAL_LEAVE_QUOTA_DAYS
+                          ? 'bg-rose-600'
+                          : totalAnnualLeaveUsedThisYear >= 11
+                            ? 'bg-amber-500'
+                            : 'bg-indigo-600'
+                      }`}
+                      style={{ width: `${annualLeavePct}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[9px] text-slate-600 font-medium">
+                    <span>
+                      Prior months: <strong>{usedLeaveOtherMonths}d</strong> • Left:{' '}
+                      <strong
+                        className={
+                          remainingAnnualLeave === 0 ? 'text-rose-700' : 'text-emerald-700'
+                        }
+                      >
+                        {remainingAnnualLeave}d
+                      </strong>
+                    </span>
+                    <span className="text-amber-700 font-bold">Reduces Att. Allow.</span>
+                  </div>
+                </div>
               </div>
 
               <div className="p-2 rounded-lg bg-rose-50/50 border border-rose-200/90 space-y-1.5">
@@ -1040,11 +1348,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
-                      max={25}
-                      step={0.5}
+                      max={26}
+                      step="any"
                       disabled={isPaidLocked}
-                      value={unpaidDays}
-                      onChange={(e) => setUnpaidDays(clampNumber(e.target.value, 0, 25))}
+                      value={Number(unpaidDays.toFixed(4))}
+                      onChange={(e) => setUnpaidDays(clampNumber(e.target.value, 0, 26))}
                       className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
@@ -1055,13 +1363,13 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     <input
                       type="number"
                       min={0}
-                      max={200}
-                      step={1}
+                      max={208}
+                      step="any"
                       disabled={isPaidLocked}
                       value={unpaidHours}
                       onChange={(e) => {
-                        const hrs = clampNumber(e.target.value, 0, 200);
-                        setUnpaidDays(Math.min(25, Number((hrs / 8).toFixed(2))));
+                        const hrs = clampNumber(e.target.value, 0, 208);
+                        setUnpaidDays(Math.min(26, Number((hrs / 8).toFixed(6))));
                       }}
                       className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
@@ -1083,7 +1391,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     />
                   </div>
                   <span className="text-[9px] text-slate-500 block">
-                    6 Days (48h) limit before Allowances lock (max 25d)
+                    6 Days (48h) limit before Allowances lock (26d / 208h base)
                   </span>
                 </div>
               </div>
@@ -1120,9 +1428,9 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
       </div>
 
       {/* Sharp Compact Financial Summary Bar */}
-      <div className="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-md border border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-5 xl:gap-x-6 gap-y-3 sm:divide-x sm:divide-slate-800 min-w-0">
-          <div className="pr-1">
+      <div className="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-md border border-slate-800 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5 min-w-0">
+          <div>
             <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Basic Salary
             </span>
@@ -1131,7 +1439,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </span>
           </div>
 
-          <div className="sm:pl-5 xl:pl-6 pr-1">
+          <div className="pl-3 border-l border-slate-800">
             <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Additions
             </span>
@@ -1140,7 +1448,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </span>
           </div>
 
-          <div className="sm:pl-5 xl:pl-6 pr-1">
+          <div className="pl-3 border-l border-slate-800">
             <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Gross Salary
             </span>
@@ -1149,7 +1457,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </span>
           </div>
 
-          <div className="sm:pl-5 xl:pl-6 pr-1">
+          <div className="pl-3 border-l border-slate-800">
             <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Deductions
             </span>
@@ -1158,7 +1466,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </span>
           </div>
 
-          <div className="sm:pl-5 xl:pl-6">
+          <div className="pl-3 border-l border-slate-800">
             <span className="text-[10px] text-emerald-400 block uppercase font-bold tracking-wider whitespace-nowrap">
               Net Salary
             </span>
@@ -1291,6 +1599,96 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             </button>
           </div>
         </div>
+      </dialog>
+
+      {/* Annual Leave 14-Day Quota Exceeded Popup Dialog */}
+      <dialog
+        ref={leaveLimitDialogRef}
+        aria-labelledby="annual-leave-limit-title"
+        onClose={() => setLeaveLimitPopup(null)}
+        className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-rose-300 bg-white p-0 shadow-2xl text-slate-900 backdrop:bg-slate-950/60 backdrop:backdrop-blur-xs"
+      >
+        {leaveLimitPopup && (
+          <div className="flex flex-col overflow-hidden rounded-2xl">
+            <div className="bg-gradient-to-r from-rose-900 via-rose-800 to-slate-900 text-white px-5 py-4 flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/25 border border-rose-300/40 text-rose-200 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 id="annual-leave-limit-title" className="text-base font-extrabold text-white">
+                  Annual Leave Limit Exceeded (14 Days / Year)
+                </h3>
+                <p className="text-xs text-rose-200 mt-0.5">
+                  වාර්ෂික නිවාඩු දින 14 සීමාව ඉක්මවා ඇත — Unpaid Leave වලට ඇතුළත් කරන්න!
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs text-slate-700">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800">
+                    EPF #{currentEmployee.epfNo}
+                  </span>
+                  <span className="font-bold text-slate-500">Year {leaveLimitPopup.year}</span>
+                </div>
+                <div className="text-sm font-black text-slate-900">
+                  {currentEmployee.fullName}
+                </div>
+                <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                  <div className="bg-white rounded-lg p-2 border border-slate-200">
+                    <div className="text-[10px] text-slate-500 font-semibold">Yearly Quota</div>
+                    <div className="text-sm font-mono font-black text-slate-900">14 Days</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-2 border border-slate-200">
+                    <div className="text-[10px] text-slate-500 font-semibold">Used in Prior Mos</div>
+                    <div className="text-sm font-mono font-black text-indigo-700">
+                      {leaveLimitPopup.usedOtherMonths}d
+                    </div>
+                  </div>
+                  <div className="bg-rose-50 rounded-lg p-2 border border-rose-200">
+                    <div className="text-[10px] text-rose-700 font-bold">Excess Leave</div>
+                    <div className="text-sm font-mono font-black text-rose-700">
+                      +{leaveLimitPopup.excess}d
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 font-semibold leading-relaxed">
+                සේවකයෙකුට වසරකට ලබාගත හැක්කේ <strong>Annual Leave දින 14ක්</strong> පමණි. දින 14 ඉක්මවන අමතර නිවාඩු දින (<strong>+{leaveLimitPopup.excess} Day(s)</strong>) Annual Leave යටතට දැමිය නොහැක — කරුණාකර එම අමතර නිවාඩු <strong>&ldquo;Unpaid Leave / Absents&rdquo;</strong> කොටසට ඇතුළත් කරන්න!
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border-t border-slate-200 px-5 py-3.5 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const excessToAdd = leaveLimitPopup.excess;
+                  setUnpaidDays((prev) =>
+                    Math.min(26, Number((prev + excessToAdd).toFixed(2)))
+                  );
+                  setLeaveLimitPopup(null);
+                  setStatusMsg({
+                    type: 'success',
+                    text: `Added +${excessToAdd}d excess leave to Unpaid Leave / Absents.`,
+                  });
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
+              >
+                Move +{leaveLimitPopup.excess}d to Unpaid Leave Now
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setLeaveLimitPopup(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 text-xs font-bold transition cursor-pointer"
+              >
+                OK, Got It
+              </button>
+            </div>
+          </div>
+        )}
       </dialog>
 
       {unlockModalOpen && (
