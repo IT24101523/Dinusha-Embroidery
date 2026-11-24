@@ -15,9 +15,9 @@ export const ANNUAL_LEAVE_QUOTA_DAYS = 14;
 /**
  * Attendance allowance rule:
  * 1) By Leave / Absent Days (unpaidDays + annualLeaveDays):
- *    - <= 1 day: LKR 5,000 (Full)
- *    - > 1 day and <= 2 days: LKR 2,500 (Half)
- *    - > 2 days: LKR 0 (None)
+ *    - < 1 day: LKR 5,000 (Full)
+ *    - >= 1 day and < 2 days: LKR 2,500 (Half)
+ *    - >= 2 days: LKR 0 (None)
  * 2) By Late & Early Out Hours (lateHours):
  *    - < 12 hrs: LKR 5,000 (Full)
  *    - >= 12 hrs and < 28 hrs: LKR 2,500 (Half)
@@ -36,9 +36,9 @@ export function calculateAttendanceAllowance(
   const late = Math.max(0, Number(lateHours) || 0);
 
   const fromLeave =
-    leaveDays <= 1
+    leaveDays < 1
       ? FULL_ATTENDANCE_ALLOWANCE
-      : leaveDays <= 2
+      : leaveDays < 2
         ? ONE_DAY_ABSENT_ATTENDANCE_ALLOWANCE
         : 0;
 

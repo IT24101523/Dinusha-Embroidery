@@ -986,10 +986,10 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                     {attAllow === 5000
                       ? 'Full Allowance'
                       : attAllow === 2500
-                      ? lateHours >= 12 && totalLeaveAndAbsentDays <= 1
+                      ? lateHours >= 12 && totalLeaveAndAbsentDays < 1
                         ? `Late ${lateHours}h (≥12h) • Half`
                         : `${totalLeaveAndAbsentDays}d Absent • Half`
-                      : lateHours >= 28 && totalLeaveAndAbsentDays <= 2
+                      : lateHours >= 28 && totalLeaveAndAbsentDays < 2
                       ? `Late ${lateHours}h (≥28h) • None`
                       : `${totalLeaveAndAbsentDays}d Absent • None`}
                   </span>
@@ -1005,7 +1005,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 >
                   <span>LKR {attAllow.toLocaleString()}</span>
                   <span className="text-[10px] font-sans font-medium opacity-75">
-                    Leave: &gt;1d=2.5k, &gt;2d=0 | Late: 12h+=2.5k, 28h+=0
+                    Leave: 1d+=2.5k, 2d+=0 | Late: 12h+=2.5k, 28h+=0
                   </span>
                 </div>
               </div>
