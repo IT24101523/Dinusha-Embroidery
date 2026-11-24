@@ -789,7 +789,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 />
                 <div className="flex items-center justify-between mt-1 gap-1">
                   <span className="text-[10px] text-slate-400">
-                    LKR {calculation?.otRate || 0}/hr
+                    LKR {calculation?.otRate || 0}/hr (÷208×1.5)
                   </span>
                   <div className="flex items-center gap-1">
                     <button

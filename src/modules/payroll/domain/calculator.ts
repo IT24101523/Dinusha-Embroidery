@@ -1,8 +1,8 @@
 import { MonthlySalaryInput, PayrollCalculationBreakdown, EmployeeEntity } from './entities';
 
-export const STANDARD_MONTH_HOURS = 200; // OT hourly divisor (Basic / 200)
-export const STANDARD_MONTH_DAYS = 26; // Unpaid leave daily divisor (Basic / 26)
-export const STANDARD_DEDUCTION_MONTH_HOURS = 208; // Unpaid/Late hourly divisor (26 days * 8 hrs = 208)
+export const STANDARD_MONTH_HOURS = 208; // Standard hourly divisor (26 days * 8 hrs = 208)
+export const STANDARD_MONTH_DAYS = 26; // Standard daily divisor (Basic / 26)
+export const STANDARD_DEDUCTION_MONTH_HOURS = 208; // Unpaid/Late/OT hourly divisor (26 days * 8 hrs = 208)
 export const NORMAL_OT_MULTIPLIER = 1.5;
 export const SUNDAY_OT_MULTIPLIER = 2.0;
 export const EPF_EMPLOYEE_RATE = 0.08; // 8%
@@ -84,9 +84,9 @@ export function calculateSalaryForEmployee(
   const checkingAllow = isAllowanceLocked ? 0 : Math.max(0, Number(input.checkingAllow) || 0);
   const totalSpecialIncentives = Number((prodAllow + checkingAllow).toFixed(2));
 
-  // Overtime:
-  // - Normal OT (1.5x): (Basic / 200) * 1.5 * Hours
-  // - Double OT / SOT (2.0x): (Basic / 208) * 2.0 * Hours  [26 working days * 8 hrs]
+  // Overtime (26 working days * 8 hrs = 208 hours divisor):
+  // - Normal OT (1.5x): (Basic / 208) * 1.5 * Hours
+  // - Double OT / SOT (2.0x): (Basic / 208) * 2.0 * Hours
   const otHours = Math.max(0, Number(input.otHours) || 0);
   const otRate = Number((otHourlyRate * NORMAL_OT_MULTIPLIER).toFixed(2));
   const otAmt = Number((otHourlyRate * NORMAL_OT_MULTIPLIER * otHours).toFixed(2));
