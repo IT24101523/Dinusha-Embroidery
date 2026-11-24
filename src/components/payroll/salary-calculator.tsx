@@ -239,9 +239,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     100,
     Math.round((totalAnnualLeaveUsedThisYear / ANNUAL_LEAVE_QUOTA_DAYS) * 100)
   );
-  const totalLeaveAndAbsentDays = Number(
-    (unpaidDays + annualLeaveDays + lateHours / 8).toFixed(2)
-  );
+  const totalLeaveAndAbsentDays = Number((unpaidDays + annualLeaveDays).toFixed(2));
 
   const handleAnnualLeaveChange = (rawVal: string | number) => {
     const str = String(rawVal).trim();
@@ -985,10 +983,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                         : 'bg-rose-100 text-rose-700'
                     }`}
                   >
-                    {totalLeaveAndAbsentDays <= 1
-                      ? `${totalLeaveAndAbsentDays}d Absent • Full`
-                      : totalLeaveAndAbsentDays <= 2
-                      ? `${totalLeaveAndAbsentDays}d Absent • Half`
+                    {attAllow === 5000
+                      ? 'Full Allowance'
+                      : attAllow === 2500
+                      ? lateHours >= 12 && totalLeaveAndAbsentDays <= 1
+                        ? `Late ${lateHours}h (≥12h) • Half`
+                        : `${totalLeaveAndAbsentDays}d Absent • Half`
+                      : lateHours >= 28 && totalLeaveAndAbsentDays <= 2
+                      ? `Late ${lateHours}h (≥28h) • None`
                       : `${totalLeaveAndAbsentDays}d Absent • None`}
                   </span>
                 </div>
@@ -1003,7 +1005,7 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                 >
                   <span>LKR {attAllow.toLocaleString()}</span>
                   <span className="text-[10px] font-sans font-medium opacity-75">
-                    ≤1d: 5k | &gt;1–2d: 2.5k | &gt;2d: 0
+                    Leave: &gt;1d=2.5k, &gt;2d=0 | Late: 12h+=2.5k, 28h+=0
                   </span>
                 </div>
               </div>
