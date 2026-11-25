@@ -1,15 +1,17 @@
 'use client';
 
 import React, { useState, useRef, useMemo, useId, useEffect } from 'react';
-import { EmployeeEntity } from '@/modules/payroll/domain/entities';
+import { EmployeeEntity, isNonEpfEmployee } from '@/modules/payroll/domain/entities';
 import {
   EmployeeFormData,
   employeeFormSchema,
+  nonEpfEmployeeSchema,
   calculateAgeFromDob,
   extractBirthYearFromNic,
 } from '@/modules/payroll/domain/validation';
 import {
   saveEmployeeAction,
+  saveNonEpfEmployeeAction,
   fetchRemovedEmployeesAction,
   restoreEmployeeAction,
 } from '@/actions/employees';
@@ -41,7 +43,7 @@ interface EmployeeCrudProps {
   initialEmployees: EmployeeEntity[];
   onEmployeesChange?: (updated: EmployeeEntity[]) => void;
   onOpenCalculator?: (employeeId: string) => void;
-  externalSubTab?: 'directory' | 'form' | 'removed';
+  externalSubTab?: 'directory' | 'nonEpf' | 'form' | 'removed';
 }
 
 const DEFAULT_FORM: EmployeeFormData = {
@@ -150,9 +152,69 @@ export function EmployeeCrud({
   const [employees, setEmployees] = useState<EmployeeEntity[]>(initialEmployees);
   const [removedEmployees, setRemovedEmployees] = useState<EmployeeEntity[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'directory' | 'form' | 'removed'>(
+  const [subTab, setSubTab] = useState<'directory' | 'nonEpf' | 'form' | 'removed'>(
     externalSubTab || 'directory'
   );
+
+  // Non-EPF / Casual Staff simple form (Name, Job Role, Basic Salary only)
+  const [nonEpfEditingId, setNonEpfEditingId] = useState<string | null>(null);
+  const [nonEpfName, setNonEpfName] = useState('');
+  const [nonEpfRole, setNonEpfRole] = useState('Machine Helper');
+  const [nonEpfBasic, setNonEpfBasic] = useState<number>(25000);
+  const [nonEpfSaving, setNonEpfSaving] = useState(false);
+
+  const epfEmployees = useMemo(
+    () => employees.filter((e) => !isNonEpfEmployee(e)),
+    [employees]
+  );
+  const nonEpfEmployees = useMemo(
+    () => employees.filter((e) => isNonEpfEmployee(e)),
+    [employees]
+  );
+
+  const handleSaveNonEpfSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMsg(null);
+    const parsed = nonEpfEmployeeSchema.safeParse({
+      fullName: nonEpfName,
+      role: nonEpfRole,
+      department: 'නිෂ්පාදන අංශය',
+      basicSalary: nonEpfBasic,
+    });
+    if (!parsed.success) {
+      setStatusMsg({
+        type: 'error',
+        text: parsed.error.issues[0]?.message || 'Please enter valid Name, Job Role, and Basic Salary.',
+      });
+      return;
+    }
+
+    setNonEpfSaving(true);
+    const res = await saveNonEpfEmployeeAction(parsed.data, nonEpfEditingId || undefined);
+    setNonEpfSaving(false);
+
+    if (!res.success || !res.employee) {
+      setStatusMsg({ type: 'error', text: res.error || 'Failed to save Non-EPF employee.' });
+      return;
+    }
+
+    const saved = res.employee;
+    const updatedList = nonEpfEditingId
+      ? employees.map((emp) => (emp.id === nonEpfEditingId ? saved : emp))
+      : [...employees, saved];
+    setEmployees(updatedList);
+    onEmployeesChange?.(updatedList);
+    setStatusMsg({
+      type: 'success',
+      text: nonEpfEditingId
+        ? `Updated Non-EPF employee ${saved.fullName} (${saved.role}).`
+        : `Registered Non-EPF employee ${saved.fullName} (${saved.role}) — EPF/ETF 0%.`,
+    });
+    setNonEpfEditingId(null);
+    setNonEpfName('');
+    setNonEpfRole('Machine Helper');
+    setNonEpfBasic(25000);
+  };
 
   useEffect(() => {
     if (externalSubTab) setSubTab(externalSubTab);
@@ -206,7 +268,7 @@ export function EmployeeCrud({
 
   const filteredEmployees = useMemo(() => {
     const q = directorySearch.trim().toLowerCase();
-    return [...employees]
+    return [...epfEmployees]
       .sort((a, b) => a.epfNo - b.epfNo)
       .filter((emp) => {
         if (roleFilter !== 'ALL' && emp.role !== roleFilter) return false;
@@ -229,7 +291,7 @@ export function EmployeeCrud({
           emp.role.toLowerCase().includes(q)
         );
       });
-  }, [employees, directorySearch, roleFilter, docFilter]);
+  }, [epfEmployees, directorySearch, roleFilter, docFilter]);
 
   const updateField = <K extends keyof EmployeeFormData>(key: K, value: EmployeeFormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -471,7 +533,7 @@ export function EmployeeCrud({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>Registered Employee Directory</span>
+            <span>EPF Staff Directory</span>
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                 subTab === 'directory'
@@ -479,7 +541,32 @@ export function EmployeeCrud({
                   : 'bg-slate-200 text-slate-700'
               }`}
             >
-              {employees.length}
+              {epfEmployees.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            id={`${subTabIdPrefix}-nonEpf`}
+            aria-selected={subTab === 'nonEpf'}
+            onClick={() => setSubTab('nonEpf')}
+            className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              subTab === 'nonEpf'
+                ? 'bg-amber-600 text-white shadow-sm after:content-[""] after:absolute after:inset-x-4 after:bottom-1 after:border-b-2 after:border-amber-200'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Non-EPF Staff (EPF රහිත)</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                subTab === 'nonEpf'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {nonEpfEmployees.length}
             </span>
           </button>
 
@@ -553,6 +640,214 @@ export function EmployeeCrud({
           </button>
         )}
       </div>
+
+      {/* Tab: Non-EPF / Casual Staff (Name, Job Role & Basic Salary Only — 0% EPF/ETF) */}
+      {subTab === 'nonEpf' && (
+        <div
+          role="tabpanel"
+          aria-labelledby={`${subTabIdPrefix}-nonEpf`}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-5"
+        >
+          {/* Left Quick Registration Form */}
+          <div className="lg:col-span-4 bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden h-fit">
+            <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-slate-900 text-white px-5 py-4">
+              <h3 className="text-sm font-extrabold tracking-tight flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-amber-200" />
+                {nonEpfEditingId ? 'Edit Non-EPF Employee' : 'Add Non-EPF Employee'}
+              </h3>
+              <p className="text-[11px] text-amber-100 mt-0.5">
+                Name, Job Role &amp; Basic Salary only — EPF (8%/12%) &amp; ETF (3%) are automatically LKR 0.00.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveNonEpfSubmit} className="p-5 space-y-4">
+              <div>
+                <label
+                  htmlFor={`${subTabIdPrefix}-nonepf-name`}
+                  className="block text-xs font-bold text-slate-700 mb-1"
+                >
+                  Employee Name (සේවකයාගේ නම) *
+                </label>
+                <input
+                  id={`${subTabIdPrefix}-nonepf-name`}
+                  type="text"
+                  required
+                  placeholder="e.g. Kamal Bandara"
+                  value={nonEpfName}
+                  onChange={(e) => setNonEpfName(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor={`${subTabIdPrefix}-nonepf-role`}
+                  className="block text-xs font-bold text-slate-700 mb-1"
+                >
+                  Job Role (තනතුර) *
+                </label>
+                <input
+                  id={`${subTabIdPrefix}-nonepf-role`}
+                  list={`${subTabIdPrefix}-nonepf-roles-list`}
+                  type="text"
+                  required
+                  placeholder="Select or type role..."
+                  value={nonEpfRole}
+                  onChange={(e) => setNonEpfRole(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                />
+                <datalist id={`${subTabIdPrefix}-nonepf-roles-list`}>
+                  {JOB_ROLES.map((r) => (
+                    <option key={r} value={r} />
+                  ))}
+                  <option value="Trainee Operator" />
+                  <option value="Casual Helper" />
+                  <option value="Contract Worker" />
+                </datalist>
+              </div>
+
+              <div>
+                <label
+                  htmlFor={`${subTabIdPrefix}-nonepf-basic`}
+                  className="block text-xs font-bold text-slate-700 mb-1"
+                >
+                  Basic Salary (මූලික වැටුප - LKR) *
+                </label>
+                <input
+                  id={`${subTabIdPrefix}-nonepf-basic`}
+                  type="number"
+                  min={1000}
+                  max={500000}
+                  step={500}
+                  required
+                  value={nonEpfBasic}
+                  onChange={(e) => setNonEpfBasic(Number(e.target.value) || 0)}
+                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-white"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 font-semibold">
+                EPF 8%, Employer EPF 12%, සහ ETF 3% කපන්නේ නැහැ — EPF Form C සහ ETF Return වලටත් එකතු වෙන්නේ නැහැ.
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={nonEpfSaving}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {nonEpfSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {nonEpfEditingId ? 'Update Non-EPF Staff' : 'Add Non-EPF Staff'}
+                </button>
+                {nonEpfEditingId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNonEpfEditingId(null);
+                      setNonEpfName('');
+                      setNonEpfRole('Machine Helper');
+                      setNonEpfBasic(25000);
+                    }}
+                    className="py-2.5 px-3 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+
+          {/* Right Non-EPF Staff List */}
+          <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
+                  Non-EPF / Casual Staff Directory ({nonEpfEmployees.length})
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Same salary calculation rules (OT, Allowances, Attendance, Leave) with 0% EPF / ETF
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                EPF &amp; ETF Exempt
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5">Employee Name</th>
+                    <th className="p-3.5">Job Role</th>
+                    <th className="p-3.5 text-right">Basic Salary (LKR)</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {nonEpfEmployees.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-10 text-center text-slate-400 font-medium">
+                        No Non-EPF staff registered yet. Use the form on the left to add an employee with Name, Job Role, and Basic Salary.
+                      </td>
+                    </tr>
+                  ) : (
+                    nonEpfEmployees.map((emp) => (
+                      <tr key={emp.id} className="hover:bg-amber-50/30 transition">
+                        <td className="p-3.5">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                            NON-EPF (0%)
+                          </span>
+                        </td>
+                        <td className="p-3.5 font-extrabold text-slate-900">{emp.fullName}</td>
+                        <td className="p-3.5 font-semibold text-slate-600">{emp.role}</td>
+                        <td className="p-3.5 text-right font-mono font-black text-emerald-700">
+                          LKR {emp.basicSalary.toLocaleString()}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <div className="inline-flex items-center gap-1.5">
+                            {onOpenCalculator && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenCalculator(emp.id)}
+                                className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Calculator className="w-3 h-3" />
+                                Salary
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNonEpfEditingId(emp.id);
+                                setNonEpfName(emp.fullName);
+                                setNonEpfRole(emp.role);
+                                setNonEpfBasic(emp.basicSalary);
+                              }}
+                              aria-label={`Edit ${emp.fullName}`}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50 cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEmployeeToDelete(emp)}
+                              aria-label={`Remove ${emp.fullName}`}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab 2: Onboarding / Edit Form Studio */}
       {subTab === 'form' && (

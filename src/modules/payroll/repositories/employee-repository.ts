@@ -1,6 +1,10 @@
 import { supabaseAdmin, formatSupabaseError } from '@/lib/supabase/admin';
-import { EmployeeEntity } from '../domain/entities';
-import { EmployeeFormData } from '../domain/validation';
+import {
+  EmployeeEntity,
+  NON_EPF_NUMBER_START,
+  isNonEpfEmployee,
+} from '../domain/entities';
+import { EmployeeFormData, NonEpfEmployeeFormData } from '../domain/validation';
 
 export class EmployeeRepository {
   async getAllEmployees(includeInactive = false): Promise<EmployeeEntity[]> {
@@ -127,6 +131,42 @@ export class EmployeeRepository {
     return this.mapToEntity(data);
   }
 
+  async createNonEpfEmployee(payload: NonEpfEmployeeFormData): Promise<EmployeeEntity> {
+    const { data: maxRows } = await supabaseAdmin
+      .from('employees')
+      .select('epf_no')
+      .gte('epf_no', NON_EPF_NUMBER_START)
+      .order('epf_no', { ascending: false })
+      .limit(1);
+
+    const lastNo =
+      maxRows && maxRows.length > 0 ? Number(maxRows[0].epf_no) : NON_EPF_NUMBER_START;
+    const nextNonEpfNo = Math.max(NON_EPF_NUMBER_START, lastNo) + 1;
+
+    const { data, error } = await supabaseAdmin
+      .from('employees')
+      .insert([
+        {
+          epf_no: nextNonEpfNo,
+          full_name: payload.fullName.trim(),
+          nic: `NON-EPF-${nextNonEpfNo}`,
+          role: payload.role.trim(),
+          department: payload.department || 'නිෂ්පාදන අංශය',
+          basic_salary: payload.basicSalary,
+          is_active: true,
+        },
+      ])
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[EmployeeRepository] createNonEpfEmployee error:', error);
+      throw new Error(formatSupabaseError(error));
+    }
+
+    return this.mapToEntity(data);
+  }
+
   async deleteEmployeeWithReason(id: string, reason: string, notes?: string): Promise<void> {
     const { error } = await supabaseAdmin
       .from('employees')
@@ -185,6 +225,10 @@ export class EmployeeRepository {
       deletionReason: row.deletion_reason ? String(row.deletion_reason) : null,
       deletionNotes: row.deletion_notes ? String(row.deletion_notes) : null,
       deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+      isNonEpf: isNonEpfEmployee({
+        epfNo: Number(row.epf_no),
+        nic: row.nic ? String(row.nic) : null,
+      }),
       isActive: Boolean(row.is_active),
       createdAt: row.created_at ? String(row.created_at) : undefined,
       updatedAt: row.updated_at ? String(row.updated_at) : undefined,

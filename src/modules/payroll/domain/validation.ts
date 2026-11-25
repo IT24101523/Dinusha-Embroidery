@@ -192,7 +192,7 @@ export const monthlySalaryInputSchema = z.object({
   month: z.string().min(3, 'Payroll month is required'),
   basicSalary: z.coerce
     .number()
-    .min(5000, 'Basic salary must be at least LKR 5,000')
+    .min(1000, 'Basic salary must be at least LKR 1,000')
     .max(500000, 'Basic salary cannot exceed LKR 500,000'),
   otHours: z.coerce
     .number()
@@ -260,5 +260,20 @@ export const monthlySalaryInputSchema = z.object({
     .default(0),
 });
 
+export const nonEpfEmployeeSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(2, 'Full Name must be at least 2 characters')
+    .max(150, 'Full Name too long'),
+  role: z.string().trim().min(2, 'Job role is required').max(100, 'Job role too long'),
+  department: z.string().trim().default('නිෂ්පාදන අංශය'),
+  basicSalary: z.coerce
+    .number({ message: 'Basic salary must be a number' })
+    .min(1000, 'Basic salary must be at least LKR 1,000')
+    .max(500000, 'Basic salary cannot exceed LKR 500,000'),
+});
+
+export type NonEpfEmployeeFormData = z.infer<typeof nonEpfEmployeeSchema>;
 export type EmployeeFormData = z.infer<typeof employeeFormSchema>;
 export type MonthlySalaryInputData = z.infer<typeof monthlySalaryInputSchema>;

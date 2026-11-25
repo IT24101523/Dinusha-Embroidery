@@ -28,9 +28,24 @@ export interface EmployeeEntity {
   deletionReason?: string | null;
   deletionNotes?: string | null;
   deletedAt?: string | null;
+  isNonEpf?: boolean;
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export const NON_EPF_NUMBER_START = 900000;
+
+export function isNonEpfEmployee(emp?: {
+  epfNo?: number | null;
+  nic?: string | null;
+  isNonEpf?: boolean;
+} | null): boolean {
+  if (!emp) return false;
+  if (emp.isNonEpf) return true;
+  if (typeof emp.epfNo === 'number' && emp.epfNo >= NON_EPF_NUMBER_START) return true;
+  if (typeof emp.nic === 'string' && emp.nic.toUpperCase().startsWith('NON-EPF')) return true;
+  return false;
 }
 
 export interface MonthlySalaryInput {

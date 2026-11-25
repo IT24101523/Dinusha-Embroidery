@@ -1,7 +1,13 @@
 'use server';
 
 import { employeeRepository } from '@/modules/payroll/repositories/employee-repository';
-import { employeeFormSchema, EmployeeFormData, formatZodError } from '@/modules/payroll/domain/validation';
+import {
+  employeeFormSchema,
+  EmployeeFormData,
+  nonEpfEmployeeSchema,
+  NonEpfEmployeeFormData,
+  formatZodError,
+} from '@/modules/payroll/domain/validation';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { recordAuditLog } from '@/lib/audit';
 import { revalidatePath } from 'next/cache';
@@ -69,6 +75,40 @@ export async function saveEmployeeAction(
       module: 'Employees',
       action: id ? 'UPDATE' : 'CREATE',
       summary: `${id ? 'Updated' : 'Registered'} employee EPF #${saved.epfNo} - ${saved.fullName} (${saved.role}).`,
+    });
+
+    revalidatePath('/payroll');
+    revalidatePath('/erp');
+    revalidatePath('/');
+    return { success: true, employee: saved };
+  } catch (err) {
+    return { success: false, error: formatZodError(err) };
+  }
+}
+
+export async function saveNonEpfEmployeeAction(
+  data: NonEpfEmployeeFormData,
+  id?: string
+): Promise<{ success: boolean; employee?: EmployeeEntity; error?: string }> {
+  try {
+    const validated = nonEpfEmployeeSchema.parse(data);
+
+    let saved: EmployeeEntity;
+    if (id) {
+      saved = await employeeRepository.updateEmployee(id, {
+        fullName: validated.fullName,
+        role: validated.role,
+        department: validated.department,
+        basicSalary: validated.basicSalary,
+      });
+    } else {
+      saved = await employeeRepository.createNonEpfEmployee(validated);
+    }
+
+    await recordAuditLog({
+      module: 'Employees',
+      action: id ? 'UPDATE_NON_EPF' : 'CREATE_NON_EPF',
+      summary: `${id ? 'Updated' : 'Registered'} Non-EPF employee ${saved.fullName} (${saved.role}).`,
     });
 
     revalidatePath('/payroll');

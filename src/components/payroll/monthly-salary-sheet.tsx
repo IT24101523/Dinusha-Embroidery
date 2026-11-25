@@ -1,7 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
+import {
+  EmployeeEntity,
+  PayrollCalculationBreakdown,
+  isNonEpfEmployee,
+} from '@/modules/payroll/domain/entities';
 import { fetchMonthlyRecordsAction, updateSalaryPaymentStatusAction } from '@/actions/payroll';
 import { exportToExcel } from '@/modules/payroll/domain/epf-etf-utils';
 import { AdminUnlockModal } from './admin-unlock-modal';
@@ -23,6 +27,7 @@ interface MonthlySalarySheetProps {
 
 export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
   const [month, setMonth] = useState<string>('October 2026');
+  const [staffFilter, setStaffFilter] = useState<'ALL' | 'EPF' | 'NON_EPF'>('ALL');
   const [savedRecords, setSavedRecords] = useState<Record<string, PayrollCalculationBreakdown>>({});
   const [loading, setLoading] = useState<boolean>(false);
   const [actionEmpId, setActionEmpId] = useState<string | null>(null);
@@ -61,10 +66,15 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
   // Show ONLY employees whose monthly salary has actually been calculated & saved for the selected month
   const rows = useMemo(() => {
     return employees
-      .filter((e) => e.isActive && Boolean(savedRecords[e.id]))
+      .filter((e) => {
+        if (!e.isActive || !savedRecords[e.id]) return false;
+        if (staffFilter === 'EPF' && isNonEpfEmployee(e)) return false;
+        if (staffFilter === 'NON_EPF' && !isNonEpfEmployee(e)) return false;
+        return true;
+      })
       .sort((a, b) => a.epfNo - b.epfNo)
       .map((emp) => savedRecords[emp.id]);
-  }, [employees, savedRecords]);
+  }, [employees, savedRecords, staffFilter]);
 
   // Totals calculations
   const totals = useMemo(() => {
@@ -106,7 +116,7 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
 
   const handleExportExcel = () => {
     const excelData: Record<string, unknown>[] = rows.map((r) => ({
-      NO: r.epfNo,
+      NO: isNonEpfEmployee(r) ? 'Non-EPF' : r.epfNo,
       Name: r.name,
       'Basic+Bud': r.basic,
       'Allowance (Production)': r.prodAllow,
@@ -250,6 +260,23 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
                 <option value="November 2026" className="text-slate-900">November 2026</option>
                 <option value="December 2026" className="text-slate-900">December 2026</option>
               </select>
+            </div>
+
+            <div className="flex items-center gap-1 bg-white/10 p-1 rounded-xl border border-white/15 text-[11px] font-bold">
+              {(['ALL', 'EPF', 'NON_EPF'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setStaffFilter(t)}
+                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                    staffFilter === t
+                      ? 'bg-white text-slate-950 shadow-xs'
+                      : 'text-slate-200 hover:bg-white/15'
+                  }`}
+                >
+                  {t === 'ALL' ? 'All Staff' : t === 'EPF' ? 'EPF Only' : 'Non-EPF Only'}
+                </button>
+              ))}
             </div>
 
             <button
@@ -468,7 +495,9 @@ export function MonthlySalarySheet({ employees }: MonthlySalarySheetProps) {
                     key={r.employeeId}
                     className={isPaid ? 'bg-emerald-50/25 hover:bg-emerald-50/40' : 'hover:bg-slate-50'}
                   >
-                    <td className="border border-black py-0.5 px-0.5 text-center font-bold">{r.epfNo}</td>
+                    <td className="border border-black py-0.5 px-0.5 text-center font-bold">
+                      {isNonEpfEmployee(r) ? 'Non-EPF' : r.epfNo}
+                    </td>
                     <td
                       className="border border-black py-0.5 px-1 font-sans font-medium text-left truncate"
                       title={r.name}

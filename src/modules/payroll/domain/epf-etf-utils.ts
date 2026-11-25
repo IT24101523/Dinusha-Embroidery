@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { EmployeeEntity, PayrollCalculationBreakdown } from './entities';
+import { EmployeeEntity, PayrollCalculationBreakdown, isNonEpfEmployee } from './entities';
 
 export interface EpfEtfRow {
   memberNo: number;
@@ -63,7 +63,7 @@ export function generateEpfEtfData(
   const period = formatMonthToPeriod(monthString);
 
   return employees
-    .filter((e) => e.isActive && Boolean(recordsMap[e.id]))
+    .filter((e) => e.isActive && !isNonEpfEmployee(e) && Boolean(recordsMap[e.id]))
     .sort((a, b) => a.epfNo - b.epfNo)
     .map((emp) => {
       // Prioritize explicit initials and surname fields, fallback to name parser

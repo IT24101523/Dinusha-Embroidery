@@ -133,15 +133,28 @@ export async function fetchFinanceBundleAction(): Promise<{
           (Number(r.special_leave_amt) || 0);
 
         const basic = Number(r.basic) || 0;
-        const epf12 =
-          Number(r.epf12 ?? r.epf_12) || Math.round(basic * 0.12 * 100) / 100;
-        const etf3 =
-          Number(r.etf3 ?? r.etf_3) || Math.round(basic * 0.03 * 100) / 100;
+        const epfNoNum = Number(r.epf_no) || 0;
+        const isNonEpf =
+          epfNoNum >= 900000 || String(r.nic || '').toUpperCase().startsWith('NON-EPF');
+        const rawEpf12 = r.epf12 ?? r.epf_12;
+        const rawEtf3 = r.etf3 ?? r.etf_3;
+        const epf12 = isNonEpf
+          ? 0
+          : rawEpf12 !== null && rawEpf12 !== undefined
+            ? Number(rawEpf12) || 0
+            : Math.round(basic * 0.12 * 100) / 100;
+        const etf3 = isNonEpf
+          ? 0
+          : rawEtf3 !== null && rawEtf3 !== undefined
+            ? Number(rawEtf3) || 0
+            : Math.round(basic * 0.03 * 100) / 100;
 
         return {
           id: `erp-${String(r.id)}`,
           month: normalizePayrollMonth(String(r.month || '')),
-          name: `${String(r.name || 'Employee')} (EPF #${String(r.epf_no || '')})`,
+          name: isNonEpf
+            ? `${String(r.name || 'Employee')} (Non-EPF)`
+            : `${String(r.name || 'Employee')} (EPF #${String(r.epf_no || '')})`,
           basic,
           ot: Math.round(otAndAllowances * 100) / 100,
           epf12,

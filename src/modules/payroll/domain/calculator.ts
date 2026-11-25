@@ -1,4 +1,9 @@
-import { MonthlySalaryInput, PayrollCalculationBreakdown, EmployeeEntity } from './entities';
+import {
+  MonthlySalaryInput,
+  PayrollCalculationBreakdown,
+  EmployeeEntity,
+  isNonEpfEmployee,
+} from './entities';
 
 export const STANDARD_MONTH_HOURS = 208; // Standard hourly divisor (26 days * 8 hrs = 208)
 export const STANDARD_MONTH_DAYS = 26; // Standard daily divisor (Basic / 26)
@@ -105,16 +110,19 @@ export function calculateSalaryForEmployee(
   // Gross Salary
   const gross = Number((basic + totalAllowances + totalSpecialIncentives + totalOt).toFixed(2));
 
-  // Statutory Employer & Employee Contributions calculated on earned basic (basic minus unpaid leave & late/early out deductions)
+  // Statutory Employer & Employee Contributions:
+  // - Non-EPF / Casual Staff: EPF 8% = 0, Employer EPF 12% = 0, Employer ETF 3% = 0
+  // - EPF Staff: Calculated on earned basic (basic minus unpaid leave & late/early out deductions)
+  const nonEpf = isNonEpfEmployee(employee);
   const epfLiableBasic = Math.max(
     0,
     Number((basic - unpaidDeduction - lateDeduction).toFixed(2))
   );
-  const epf12 = Number((epfLiableBasic * EPF_EMPLOYER_RATE).toFixed(2));
-  const etf3 = Number((epfLiableBasic * ETF_EMPLOYER_RATE).toFixed(2));
+  const epf12 = nonEpf ? 0 : Number((epfLiableBasic * EPF_EMPLOYER_RATE).toFixed(2));
+  const etf3 = nonEpf ? 0 : Number((epfLiableBasic * ETF_EMPLOYER_RATE).toFixed(2));
 
   // Deductions
-  const epf8 = Number((epfLiableBasic * EPF_EMPLOYEE_RATE).toFixed(2));
+  const epf8 = nonEpf ? 0 : Number((epfLiableBasic * EPF_EMPLOYEE_RATE).toFixed(2));
 
   const advance = Math.max(0, Number(input.advance) || 0);
 

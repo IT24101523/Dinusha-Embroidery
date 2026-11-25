@@ -1,7 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
+import {
+  EmployeeEntity,
+  PayrollCalculationBreakdown,
+  isNonEpfEmployee,
+} from '@/modules/payroll/domain/entities';
 import { calculateSalaryForEmployee } from '@/modules/payroll/domain/calculator';
 import { fetchMonthlyRecordsAction } from '@/actions/payroll';
 import {
@@ -247,7 +251,7 @@ export function PayslipPrintManager({ employees }: PayslipPrintManagerProps) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
                       <span className="font-mono font-bold text-[11px] truncate">
-                        #{emp.epfNo}
+                        {isNonEpfEmployee(emp) ? 'Non-EPF' : `#${emp.epfNo}`}
                       </span>
                       <span
                         className={`px-1.5 py-0.2 rounded-sm text-[9px] font-bold uppercase ${
@@ -431,7 +435,7 @@ function PayslipSingleItem({
                 සේ.අ.අ අංකය
               </td>
               <td className="py-[1px] px-1 border-r border-black font-mono font-black text-[8.5px]">
-                {record.epfNo}
+                {isNonEpfEmployee(record) ? 'Non-EPF' : record.epfNo}
               </td>
               <td className="py-[1px] px-1 font-bold border-r border-black bg-slate-50 truncate">
                 සේ.අ.අ 12%

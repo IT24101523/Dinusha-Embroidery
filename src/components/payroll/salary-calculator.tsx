@@ -1,7 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { EmployeeEntity, PayrollCalculationBreakdown } from '@/modules/payroll/domain/entities';
+import {
+  EmployeeEntity,
+  PayrollCalculationBreakdown,
+  isNonEpfEmployee,
+} from '@/modules/payroll/domain/entities';
 import {
   MonthlySalaryInputData,
   monthlySalaryInputSchema,
@@ -57,7 +61,14 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [selectedId, setSelectedId] = useState<string>(
     selectedEmployeeId || employees[0]?.id || ''
   );
+  const [staffTypeFilter, setStaffTypeFilter] = useState<'ALL' | 'EPF' | 'NON_EPF'>('ALL');
   const [month, setMonth] = useState<string>('October 2026');
+
+  const visibleEmployees = useMemo(() => {
+    if (staffTypeFilter === 'EPF') return employees.filter((e) => !isNonEpfEmployee(e));
+    if (staffTypeFilter === 'NON_EPF') return employees.filter((e) => isNonEpfEmployee(e));
+    return employees;
+  }, [employees, staffTypeFilter]);
 
   // Input states
   const [otHours, setOtHours] = useState<number>(0);
@@ -115,18 +126,23 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
   // Active employee
   const currentEmployee = useMemo(() => {
-    return employees.find((e) => e.id === selectedId) || employees[0] || null;
-  }, [employees, selectedId]);
+    const pool = visibleEmployees.length > 0 ? visibleEmployees : employees;
+    return pool.find((e) => e.id === selectedId) || pool[0] || null;
+  }, [visibleEmployees, employees, selectedId]);
+
+  const isCurrentNonEpf = isNonEpfEmployee(currentEmployee);
 
   const currentIndex = useMemo(() => {
+    const pool = visibleEmployees.length > 0 ? visibleEmployees : employees;
     if (!currentEmployee) return -1;
-    return employees.findIndex((e) => e.id === currentEmployee.id);
-  }, [employees, currentEmployee]);
+    return pool.findIndex((e) => e.id === currentEmployee.id);
+  }, [visibleEmployees, employees, currentEmployee]);
 
   const handleCycleEmployee = (direction: -1 | 1) => {
-    if (employees.length === 0 || currentIndex === -1) return;
-    const nextIdx = (currentIndex + direction + employees.length) % employees.length;
-    setSelectedId(employees[nextIdx].id);
+    const pool = visibleEmployees.length > 0 ? visibleEmployees : employees;
+    if (pool.length === 0 || currentIndex === -1) return;
+    const nextIdx = (currentIndex + direction + pool.length) % pool.length;
+    setSelectedId(pool[nextIdx].id);
   };
 
   const selectedYear = useMemo(() => {
@@ -592,13 +608,21 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
             )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/30 border border-indigo-400/40 text-indigo-100">
-                  EPF #{currentEmployee.epfNo}
-                </span>
+                {isCurrentNonEpf ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/30 border border-amber-400/50 text-amber-200">
+                    NON-EPF (0% EPF/ETF)
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/30 border border-indigo-400/40 text-indigo-100">
+                    EPF #{currentEmployee.epfNo}
+                  </span>
+                )}
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-slate-200">
                   {currentEmployee.role}
                 </span>
-                <span className="text-[10px] font-mono text-slate-300">{currentEmployee.nic}</span>
+                {!isCurrentNonEpf && (
+                  <span className="text-[10px] font-mono text-slate-300">{currentEmployee.nic}</span>
+                )}
               </div>
               <h3 className="text-base font-extrabold text-white tracking-tight truncate mt-0.5">
                 {currentEmployee.fullName}
@@ -678,17 +702,39 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
         {/* Selector Controls Strip */}
         <div className="px-4 py-2.5 bg-slate-50/60 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
           <div className="md:col-span-5">
-            <label className="block text-[11px] font-bold text-slate-700 mb-1">
-              Select Employee *
-            </label>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label className="block text-[11px] font-bold text-slate-700">
+                Select Employee *
+              </label>
+              <div className="flex items-center gap-1 text-[10px] font-bold">
+                {(['ALL', 'EPF', 'NON_EPF'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setStaffTypeFilter(t)}
+                    className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
+                      staffTypeFilter === t
+                        ? t === 'NON_EPF'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-slate-900 text-white'
+                        : 'bg-slate-200/80 text-slate-600 hover:bg-slate-300'
+                    }`}
+                  >
+                    {t === 'ALL' ? 'All' : t === 'EPF' ? 'EPF' : 'Non-EPF'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <select
               value={currentEmployee.id}
               onChange={(e) => setSelectedId(e.target.value)}
               className="w-full px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
             >
-              {employees.map((emp) => (
+              {(visibleEmployees.length > 0 ? visibleEmployees : employees).map((emp) => (
                 <option key={emp.id} value={emp.id}>
-                  EPF {emp.epfNo} - {emp.fullName} ({emp.role})
+                  {isNonEpfEmployee(emp)
+                    ? `[Non-EPF] ${emp.fullName} (${emp.role})`
+                    : `EPF ${emp.epfNo} - ${emp.fullName} (${emp.role})`}
                 </option>
               ))}
             </select>
@@ -1212,7 +1258,13 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               <div>
                 <div className="flex items-center justify-between mb-0.5">
                   <label className="text-[11px] font-semibold text-slate-700">EPF 8% Statutory</label>
-                  <span className="text-[10px] text-slate-400">8% of (Basic − Late − Unpaid)</span>
+                  <span
+                    className={`text-[10px] ${
+                      isCurrentNonEpf ? 'font-bold text-amber-700' : 'text-slate-400'
+                    }`}
+                  >
+                    {isCurrentNonEpf ? 'Non-EPF Exempt (0%)' : '8% of (Basic − Late − Unpaid)'}
+                  </span>
                 </div>
                 <div className="px-2.5 py-1.5 bg-rose-50/60 border border-rose-200 rounded-lg text-xs font-mono font-extrabold text-rose-900">
                   LKR {formatLkr2(calculation?.epf8 || 0)}
