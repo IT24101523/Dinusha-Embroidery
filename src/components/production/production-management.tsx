@@ -25,6 +25,7 @@ import {
   fetchProductionBundleAction,
 } from '@/actions/production';
 import { NeedleTypeItem } from '@/components/needle/needle-management';
+import { NormalInventoryItem } from '@/components/inventory/normal-inventory-management';
 import {
   CalendarClock,
   Monitor,
@@ -69,6 +70,7 @@ const STORAGE_MACHINES_KEY = 'dinusha_machines_v2';
 const STORAGE_STYLES_KEY = 'dinusha_styles_v3';
 const STORAGE_PLANS_KEY = 'dinusha_production_plans_v1';
 const STORAGE_NEEDLE_TYPES_KEY = 'dinusha_needle_types_v2';
+const STORAGE_NORMAL_INVENTORY_KEY = 'dinusha_normal_inventory_items_v1';
 
 const THREAD_BRANDS = [
   'A&E',
@@ -188,13 +190,13 @@ interface ProductionManagementProps {
   externalSubTab?: ProductionSubTab;
 }
 
-function createEmptyPart(defaultNeedle = ''): StylePartItem {
+function createEmptyPart(defaultNeedle = '', defaultBacking = 'No Backing'): StylePartItem {
   return {
     name: '',
     qty: 1,
-    backing: 'Tearaway (Standard)',
+    backing: defaultBacking || 'No Backing',
     needle: defaultNeedle,
-    threads: [{ color: '', shade: '', brand: 'Madeira', mLen: 0, cLen: 5000 }],
+    threads: [{ color: '', shade: '', brand: 'A&E', mLen: 0, cLen: 5000 }],
   };
 }
 
@@ -226,6 +228,8 @@ export function ProductionManagement({
 
   // Needle specs synced from Needle Management Stock Directory
   const [stockNeedles, setStockNeedles] = useState<string[]>([]);
+  // Backing items synced from Normal Inventory (category === 'Backing')
+  const [inventoryBackings, setInventoryBackings] = useState<string[]>([]);
 
   // Live clock for editor & floor display headers
   const [liveTime, setLiveTime] = useState<string>('');
@@ -271,7 +275,7 @@ export function ProductionManagement({
     }
   }, [companies, machines, styles, plans, onBundleChange]);
 
-  // Load Needle specs from Needle Management localStorage & DB so Style CRUD Needle dropdown shows only actual registered needles
+  // Load Needle specs from Needle Management & Backing list from Normal Inventory localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_NEEDLE_TYPES_KEY);
@@ -291,6 +295,36 @@ export function ProductionManagement({
     } catch {
       // Ignore storage errors
     }
+
+    try {
+      const rawInv = localStorage.getItem(STORAGE_NORMAL_INVENTORY_KEY);
+      if (rawInv) {
+        const parsedInv = JSON.parse(rawInv) as NormalInventoryItem[];
+        if (Array.isArray(parsedInv)) {
+          const backings = Array.from(
+            new Set(
+              parsedInv
+                .filter(
+                  (item) =>
+                    item.itemName &&
+                    String(item.category || '').toLowerCase().includes('backing')
+                )
+                .map((item) => {
+                  const extras = [item.codeOrColor, item.specOrSize]
+                    .map((s) => (s || '').trim())
+                    .filter((s) => s && s !== '-');
+                  return extras.length > 0
+                    ? `${item.itemName.trim()} (${extras.join(' / ')})`
+                    : item.itemName.trim();
+                })
+            )
+          );
+          setInventoryBackings(backings);
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
   }, [subTab]);
 
   // Live clock interval
@@ -305,6 +339,10 @@ export function ProductionManagement({
     const merged = new Set<string>([...stockNeedles, ...(initialBundle.needles || [])]);
     return Array.from(merged);
   }, [stockNeedles, initialBundle.needles]);
+
+  const backingOptions = useMemo(() => {
+    return ['No Backing', ...inventoryBackings.filter((b) => b.toLowerCase() !== 'no backing')];
+  }, [inventoryBackings]);
 
   const activeEmployees = useMemo(
     () => employees.filter((e) => e.isActive !== false),
@@ -792,7 +830,9 @@ export function ProductionManagement({
     setStyleQty(1000);
     setDraftSizes([{ size: '', qty: 1000 }]);
     setSizeLimitWarning(null);
-    setDraftParts([createEmptyPart(needleSpecOptions[0] || '')]);
+    setDraftParts([
+      createEmptyPart(needleSpecOptions[0] || '', inventoryBackings[0] || 'No Backing'),
+    ]);
   };
 
   const handleEditStyle = (s: StyleMasterEntity) => {
@@ -814,7 +854,7 @@ export function ProductionManagement({
     setDraftParts(
       s.parts.length > 0
         ? JSON.parse(JSON.stringify(s.parts))
-        : [createEmptyPart(needleSpecOptions[0] || '')]
+        : [createEmptyPart(needleSpecOptions[0] || '', inventoryBackings[0] || 'No Backing')]
     );
   };
 
@@ -909,7 +949,10 @@ export function ProductionManagement({
   };
 
   const handleAddPart = () => {
-    setDraftParts((prev) => [...prev, createEmptyPart(needleSpecOptions[0] || '')]);
+    setDraftParts((prev) => [
+      ...prev,
+      createEmptyPart(needleSpecOptions[0] || '', inventoryBackings[0] || 'No Backing'),
+    ]);
   };
 
   const handleDuplicateFirstPartToNew = () => {
@@ -5116,16 +5159,19 @@ export function ProductionManagement({
                           />
                         </div>
 
-                        <div className="w-52">
+                        <div className="w-56">
                           <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
-                            Backing Required
+                            Backing Required (Inventory Synced)
                           </label>
                           <select
                             value={part.backing}
                             onChange={(e) => handleUpdatePartField(pIdx, 'backing', e.target.value)}
                             className="w-full p-1.5 border border-slate-300 rounded text-xs font-semibold bg-white"
                           >
-                            {BACKING_OPTIONS.map((b) => (
+                            {part.backing && !backingOptions.includes(part.backing) && (
+                              <option value={part.backing}>{part.backing}</option>
+                            )}
+                            {backingOptions.map((b) => (
                               <option key={b} value={b}>
                                 {b}
                               </option>
