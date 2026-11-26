@@ -44,7 +44,7 @@ const ADJUSTMENT_REASON_PRESETS = [
   'Opening Balance Recount',
 ];
 
-const SYSTEM_PRESETS = ['DB X K5', 'DB X 1', 'DP X 5', 'UY 128 GAS', 'TV X 7'];
+const BRAND_PRESETS = ['Groz-Beckert', 'Organ', 'Schmetz', 'Dotec', 'Flying Tiger'];
 const SIZE_PRESETS: Array<{ value: string; label: string; usage: string }> = [
   {
     value: '60/8',
@@ -796,8 +796,8 @@ export function NeedleManagement({
     const refCode = newRef.trim();
     const pt = newPoint.trim();
 
-    if (sys.length < 2 || sys.length > 30) {
-      showError('Needle System Code must be between 2 and 30 characters.');
+    if (sys.length < 2 || sys.length > 40) {
+      showError('Needle Brand Name must be between 2 and 40 characters.');
       return;
     }
     if (sz.length < 2 || sz.length > 20) {
@@ -1341,7 +1341,7 @@ export function NeedleManagement({
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      placeholder="Search system, size, ref, point..."
+                      placeholder="Search brand, size, ref, point..."
                       value={inventorySearch}
                       onChange={(e) => setInventorySearch(e.target.value)}
                       className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
@@ -1540,7 +1540,7 @@ export function NeedleManagement({
                     <thead className="bg-slate-900 text-white uppercase text-[11px] font-bold">
                       <tr>
                         <th className="py-3 px-4">Ref Code</th>
-                        <th className="py-3 px-4">Needle System</th>
+                        <th className="py-3 px-4">Needle Brand</th>
                         <th className="py-3 px-4">Size (Nm)</th>
                         <th className="py-3 px-4">Point Variant</th>
                         <th className="py-3 px-4">In Stock</th>
@@ -3155,19 +3155,19 @@ export function NeedleManagement({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="block text-xs font-extrabold text-slate-700">
-                    Needle System *
+                    Needle Brand *
                   </label>
                   <input
                     type="text"
                     required
-                    maxLength={30}
-                    placeholder="e.g. DB X K5"
+                    maxLength={40}
+                    placeholder="e.g. Groz-Beckert"
                     value={newSystem}
                     onChange={(e) => setNewSystem(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-persian-500"
                   />
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {SYSTEM_PRESETS.map((preset) => (
+                    {BRAND_PRESETS.map((preset) => (
                       <button
                         key={preset}
                         type="button"
@@ -3379,7 +3379,7 @@ export function NeedleManagement({
               >
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="bg-persian-800 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-md uppercase">
-                    {newSystem.trim() || 'SYSTEM CODE'}
+                    {newSystem.trim() || 'BRAND NAME'}
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
