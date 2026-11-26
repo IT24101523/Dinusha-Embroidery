@@ -45,7 +45,33 @@ const ADJUSTMENT_REASON_PRESETS = [
 ];
 
 const SYSTEM_PRESETS = ['DB X K5', 'DB X 1', 'DP X 5', 'UY 128 GAS', 'TV X 7'];
-const SIZE_PRESETS = ['65/9', '70/10', '75/11', '80/12', '90/14', '100/16'];
+const SIZE_PRESETS: Array<{ value: string; label: string; usage: string }> = [
+  {
+    value: '60/8',
+    label: '60/8',
+    usage: 'Very thin — for delicate fabrics (silk, chiffon) and tiny details.',
+  },
+  {
+    value: '65/9',
+    label: '65/9 (75/9)',
+    usage: 'Thin — for lightweight fabrics (voile, fine cotton) and small lettering.',
+  },
+  {
+    value: '75/11',
+    label: '75/11',
+    usage: 'Standard — the everyday needle for t-shirts, polo shirts, and regular embroidery.',
+  },
+  {
+    value: '90/14',
+    label: '90/14',
+    usage: 'Thick — for heavy fabrics (denim, canvas, fleece).',
+  },
+  {
+    value: '90/14 Chenille',
+    label: '90/14 Chenille',
+    usage: 'Hooked tip (no eye) — strictly for chenille machines using thick yarn.',
+  },
+];
 const POINT_PRESETS = ['FFG/SES', 'RG', 'R', 'SAN 1', 'GEBEDUR'];
 const LOW_STOCK_QUICK_QTYS = [50, 100, 200, 300, 500];
 const RESTOCK_QUICK_QTYS = [50, 100, 200, 500, 1000];
@@ -3172,21 +3198,38 @@ export function NeedleManagement({
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-persian-500"
                   />
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {SIZE_PRESETS.map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setNewSize(preset)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
-                          newSize === preset
-                            ? 'bg-persian-800 text-white border-persian-900'
-                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
+                    {SIZE_PRESETS.map((preset) => {
+                      const isSelected =
+                        newSize.trim().toLowerCase() === preset.value.toLowerCase();
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          title={preset.usage}
+                          onClick={() => setNewSize(preset.value)}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-persian-800 text-white border-persian-900'
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
                   </div>
+                  {(() => {
+                    const matchedPreset = SIZE_PRESETS.find(
+                      (p) => p.value.toLowerCase() === newSize.trim().toLowerCase()
+                    );
+                    if (!matchedPreset) return null;
+                    return (
+                      <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[10px] font-semibold text-indigo-900 leading-snug">
+                        <strong className="font-extrabold">{matchedPreset.label}:</strong>{' '}
+                        {matchedPreset.usage}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
