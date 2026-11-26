@@ -912,6 +912,71 @@ export function ProductionManagement({
     setDraftParts((prev) => [...prev, createEmptyPart(needleSpecOptions[0] || '')]);
   };
 
+  const handleDuplicateFirstPartToNew = () => {
+    const firstPart = draftParts[0];
+    if (!firstPart) {
+      handleAddPart();
+      return;
+    }
+    const clonedThreads = firstPart.threads.map((t) => ({ ...t }));
+    setDraftParts((prev) => [
+      ...prev,
+      {
+        name: '',
+        qty: firstPart.qty || 1,
+        backing: firstPart.backing,
+        needle: firstPart.needle,
+        threads: clonedThreads.length > 0 ? clonedThreads : createEmptyPart(needleSpecOptions[0] || '').threads,
+      },
+    ]);
+    showSuccess(
+      `Added new Garment Part pre-filled with Part 1 (${firstPart.name || 'Part 1'}) threads, backing & needle.`
+    );
+  };
+
+  const handleCopyFirstPartToTarget = (targetIdx: number) => {
+    const firstPart = draftParts[0];
+    if (!firstPart || targetIdx <= 0) return;
+    const clonedThreads = firstPart.threads.map((t) => ({ ...t }));
+    setDraftParts((prev) =>
+      prev.map((part, idx) =>
+        idx === targetIdx
+          ? {
+              ...part,
+              backing: firstPart.backing,
+              needle: firstPart.needle,
+              threads: clonedThreads.map((t) => ({ ...t })),
+            }
+          : part
+      )
+    );
+    showSuccess(
+      `Copied Part 1 (${firstPart.name || 'Part 1'}) thread colours, backing & needle to Part ${targetIdx + 1}.`
+    );
+  };
+
+  const handleCopyFirstPartToAll = () => {
+    const firstPart = draftParts[0];
+    if (!firstPart || draftParts.length <= 1) return;
+    setDraftParts((prev) =>
+      prev.map((part, idx) =>
+        idx === 0
+          ? part
+          : {
+              ...part,
+              backing: firstPart.backing,
+              needle: firstPart.needle,
+              threads: firstPart.threads.map((t) => ({ ...t })),
+            }
+      )
+    );
+    showSuccess(
+      `Copied Part 1 (${firstPart.name || 'Part 1'}) thread colours, backing & needle to all ${
+        draftParts.length - 1
+      } other part(s).`
+    );
+  };
+
   const handleRemovePart = (pIdx: number) => {
     if (draftParts.length <= 1) {
       showError('A style must contain at least one Garment Part.');
@@ -4961,17 +5026,42 @@ export function ProductionManagement({
 
               {/* Dynamic Parts & Thread Matrices */}
               <div>
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-sm font-bold text-slate-700">
-                    Style Parts &amp; Thread Matrices
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={handleAddPart}
-                    className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add Garment Part
-                  </button>
+                <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-700">
+                      Style Parts &amp; Thread Matrices
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Part 1 fill karala &ldquo;Duplicate Part 1&rdquo; ho &ldquo;Copy Part 1 to All Parts&rdquo; click karala thread colours ikmanata copy karanna.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {draftParts.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleCopyFirstPartToAll}
+                        className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-extrabold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Part 1 → All Parts</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleDuplicateFirstPartToNew}
+                      className="bg-persian-50 text-persian-800 border border-persian-200 px-3 py-1.5 rounded-lg text-xs font-extrabold hover:bg-persian-100 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>+ Duplicate Part 1</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddPart}
+                      className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Blank Part
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -4982,9 +5072,21 @@ export function ProductionManagement({
                     >
                       <div className="bg-slate-100 p-3 border-b border-slate-200 flex flex-wrap gap-3 items-end">
                         <div className="flex-1 min-w-[200px]">
-                          <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
-                            Part Location *
-                          </label>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                                pIdx === 0
+                                  ? 'bg-persian-800 text-white'
+                                  : 'bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              Part {pIdx + 1}
+                              {pIdx === 0 ? ' (Source)' : ''}
+                            </span>
+                            <label className="text-[10px] font-black uppercase text-slate-500">
+                              Part Location *
+                            </label>
+                          </div>
                           <input
                             type="text"
                             value={part.name}
@@ -5051,6 +5153,18 @@ export function ProductionManagement({
                             )}
                           </select>
                         </div>
+
+                        {pIdx > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyFirstPartToTarget(pIdx)}
+                            title="Copy thread colours, backing & needle from Part 1"
+                            className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1.5 rounded text-xs font-extrabold hover:bg-indigo-100 inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy from Part 1</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
