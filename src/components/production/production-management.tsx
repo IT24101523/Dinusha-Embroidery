@@ -71,6 +71,7 @@ const STORAGE_PLANS_KEY = 'dinusha_production_plans_v1';
 const STORAGE_NEEDLE_TYPES_KEY = 'dinusha_needle_types_v2';
 
 const THREAD_BRANDS = [
+  'A&E',
   'Madeira',
   'Gunold',
   'Isacord',
