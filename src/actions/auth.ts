@@ -14,6 +14,7 @@ const ERP_USER_COOKIE = 'dinusha_erp_user';
 const ERP_UID_COOKIE = 'dinusha_erp_uid';
 const ERP_EMAIL_COOKIE = 'dinusha_erp_email';
 const ERP_ROLE_COOKIE = 'dinusha_erp_role';
+const INTERNAL_USERNAME_DOMAIN = 'users.dinushaemb.com';
 
 export interface ErpSessionInfo {
   authenticated: boolean;
@@ -22,6 +23,63 @@ export interface ErpSessionInfo {
   userLabel: string | null;
   role: UserRole | null;
   allowedModules: ErpModuleId[];
+}
+
+async function resolveLoginEmail(rawIdentifier: string): Promise<string | null> {
+  const cleaned = rawIdentifier.trim().toLowerCase();
+  if (!cleaned) return null;
+
+  if (cleaned.includes('@')) {
+    return cleaned;
+  }
+
+  const normalizedUsername = cleaned.replace(/^@+/, '');
+  if (!normalizedUsername) return null;
+
+  // 1. Direct lookup for username-only internal email accounts
+  const internalEmail = `${normalizedUsername}@${INTERNAL_USERNAME_DOMAIN}`;
+  const { data: internalProf } = await supabaseAdmin
+    .from('user_profiles')
+    .select('email')
+    .eq('email', internalEmail)
+    .maybeSingle();
+  if (internalProf?.email) {
+    return String(internalProf.email).toLowerCase();
+  }
+
+  // 2. Lookup by user_metadata.username in Supabase Auth
+  try {
+    const { data: authList } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    const matchedAuth = (authList?.users || []).find((u) => {
+      const metaUsername = String(u.user_metadata?.username || '')
+        .trim()
+        .toLowerCase();
+      return metaUsername === normalizedUsername;
+    });
+    if (matchedAuth?.email) {
+      return matchedAuth.email.toLowerCase();
+    }
+  } catch {
+    // Fallback to profile lookup below
+  }
+
+  // 3. Fallback: unique match by email prefix before '@' in user_profiles
+  const { data: allProfiles } = await supabaseAdmin
+    .from('user_profiles')
+    .select('email')
+    .eq('is_active', true);
+
+  const prefixMatches = (allProfiles || []).filter((p) => {
+    const em = String(p.email || '').trim().toLowerCase();
+    const localPart = em.split('@')[0];
+    return localPart === normalizedUsername;
+  });
+
+  if (prefixMatches.length === 1 && prefixMatches[0].email) {
+    return String(prefixMatches[0].email).toLowerCase();
+  }
+
+  return null;
 }
 
 function hashOtpCode(email: string, code: string): string {
@@ -38,6 +96,13 @@ async function createAndSendOtp(params: {
   const email = params.email.trim().toLowerCase();
   if (!email) {
     return { success: false, error: 'Please enter your registered email address.' };
+  }
+  if (email.endsWith(`@${INTERNAL_USERNAME_DOMAIN}`)) {
+    return {
+      success: false,
+      error:
+        'This account uses Username & Password login only (no work email linked). Ask Super Admin to reset your password directly.',
+    };
   }
 
   const { data: profile } = await supabaseAdmin
@@ -220,27 +285,37 @@ export async function checkErpSessionAction(): Promise<ErpSessionInfo> {
 }
 
 export async function loginToErpAction(input: {
-  email: string;
+  identifier?: string;
+  username?: string;
+  email?: string;
   password: string;
 }): Promise<{ success: boolean; error?: string }> {
-  const email = (input.email || '').trim().toLowerCase();
+  const rawIdentifier = (input.identifier || input.username || input.email || '').trim();
   const password = input.password || '';
 
-  if (!email || !password) {
-    return { success: false, error: 'Please enter both email and password.' };
+  if (!rawIdentifier || !password) {
+    return { success: false, error: 'Please enter both username (or email) and password.' };
   }
 
   try {
+    const resolvedEmail = await resolveLoginEmail(rawIdentifier);
+    if (!resolvedEmail) {
+      return {
+        success: false,
+        error: 'Invalid username or password.',
+      };
+    }
+
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: resolvedEmail,
       password,
     });
 
     if (error || !data.user) {
       return {
         success: false,
-        error: error?.message || 'Invalid email or password.',
+        error: 'Invalid username or password.',
       };
     }
 
@@ -277,6 +352,7 @@ export async function loginToErpAction(input: {
       role,
     });
 
+    const loginMethod = rawIdentifier.includes('@') ? 'email & password' : `username (@${rawIdentifier.replace(/^@+/, '').toLowerCase()}) & password`;
     await recordAuditLog({
       actor: {
         userId: String(profile.auth_user_id),
@@ -286,7 +362,7 @@ export async function loginToErpAction(input: {
       },
       module: 'Auth',
       action: 'LOGIN',
-      summary: `${profile.full_name} (${role}) signed in via email & password.`,
+      summary: `${profile.full_name} (${role}) signed in via ${loginMethod}.`,
     });
 
     return { success: true };

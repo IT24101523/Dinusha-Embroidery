@@ -273,11 +273,12 @@ export function QualityManagement({
         const role = (e.role || '').toLowerCase();
         const dept = (e.department || '').toLowerCase();
         return (
-          role.includes('checker') ||
+          role.includes('check') ||
           role.includes('quality') ||
+          role.includes('qc') ||
           dept.includes('quality') ||
           dept.includes('qc') ||
-          dept.includes('checking')
+          dept.includes('check')
         );
       }),
     [activeEmployees]
@@ -2758,8 +2759,8 @@ export function QualityManagement({
                     onChange={(e) => setPlanCheckerEmp(e.target.value)}
                     className="w-full rounded-lg p-2 text-xs font-semibold outline-none bg-slate-50 border border-slate-300 text-slate-800 focus:border-persian-500"
                   >
-                    <option value="">-- Optional: Assign Staff --</option>
-                    {activeEmployees.map((emp) => {
+                    <option value="">-- Optional: Assign Checker --</option>
+                    {checkerEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                       const targetSt = checkerSlots.find((c) => c.name === planStationName);
                       const usedInOtherStation = findStationWithEmployee(
@@ -2904,13 +2905,13 @@ export function QualityManagement({
                           {/* Optional Staff Selector for this Checker Slot */}
                           <div>
                             <select
-                              aria-label={`Assign Staff for ${st.name}`}
+                              aria-label={`Assign Checker for ${st.name}`}
                               value={assignedEmp}
                               onChange={(e) => handleQuickAssignStationEmployee(st, e.target.value)}
                               className="w-full rounded-lg px-2 py-1.5 text-[11px] font-semibold outline-none cursor-pointer border bg-slate-50 border-slate-200 text-slate-800 focus:border-persian-500"
                             >
-                              <option value="">-- Optional: Assign Staff --</option>
-                              {activeEmployees.map((emp) => {
+                              <option value="">-- Optional: Assign Checker --</option>
+                              {checkerEmployees.map((emp) => {
                                 const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                                 const usedInOtherStation = findStationWithEmployee(
                                   label,
@@ -4062,13 +4063,13 @@ export function QualityManagement({
                         </th>
                         <td className="p-3">
                           <select
-                            aria-label={`Assign staff for ${st.name}`}
+                            aria-label={`Assign checker for ${st.name}`}
                             value={assignedEmp}
                             onChange={(e) => handleQuickAssignStationEmployee(st, e.target.value)}
                             className="w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none cursor-pointer border bg-slate-50 border-slate-200 text-slate-800 focus:border-persian-500"
                           >
-                            <option value="">-- Open Slot (No Staff) --</option>
-                            {activeEmployees.map((emp) => {
+                            <option value="">-- Open Slot (No Checker) --</option>
+                            {checkerEmployees.map((emp) => {
                               const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                               const usedInOtherStation = findStationWithEmployee(
                                 label,
@@ -4411,8 +4412,8 @@ export function QualityManagement({
                     onChange={(e) => setModalCheckerEmp(e.target.value)}
                     className="w-full rounded-lg p-2 text-xs font-semibold outline-none bg-slate-50 border border-slate-300 text-slate-800"
                   >
-                    <option value="">-- Optional: Assign Staff --</option>
-                    {activeEmployees.map((emp) => {
+                    <option value="">-- Optional: Assign Checker --</option>
+                    {checkerEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                       const targetSt = checkerSlots.find(
                         (c) => c.name === (modalStationName || editingBlock.stationName)

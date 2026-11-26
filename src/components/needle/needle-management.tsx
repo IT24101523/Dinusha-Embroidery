@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { MachineEntity, StyleMasterEntity } from '@/actions/production';
+import type { UserRole } from '@/db/schema/users';
 import {
   Boxes,
   FileText,
@@ -17,13 +18,48 @@ import {
   Search,
   Pin,
   ShieldCheck,
+  Pencil,
+  Trash2,
+  ArrowRight,
+  Clock,
+  SlidersHorizontal,
+  X,
+  Check,
+  Save,
+  FolderOpen,
 } from 'lucide-react';
 
-const LOW_STOCK_THRESHOLD = 200;
+const DEFAULT_LOW_STOCK_QTY = 200;
 const MAX_STOCK_LIMIT = 50000;
 const MAX_RESTOCK_QTY = 50000;
 const STORAGE_TYPES_KEY = 'dinusha_needle_types_v2';
 const STORAGE_LOGS_KEY = 'dinusha_needle_logs_v2';
+const STORAGE_CLN_DOCS_KEY = 'dinusha_needle_cln_docs_v1';
+const STORAGE_ADMIN_ADJUSTMENTS_KEY = 'dinusha_needle_admin_adjustments_v1';
+
+const ADJUSTMENT_REASON_PRESETS = [
+  'Physical Stock Audit Correction',
+  'Data Entry Mistake Fix',
+  'Damaged / Unusable Box Removed',
+  'Opening Balance Recount',
+];
+
+const SYSTEM_PRESETS = ['DB X K5', 'DB X 1', 'DP X 5', 'UY 128 GAS', 'TV X 7'];
+const SIZE_PRESETS = ['65/9', '70/10', '75/11', '80/12', '90/14', '100/16'];
+const POINT_PRESETS = ['FFG/SES', 'RG', 'R', 'SAN 1', 'GEBEDUR'];
+const LOW_STOCK_QUICK_QTYS = [50, 100, 200, 300, 500];
+const RESTOCK_QUICK_QTYS = [50, 100, 200, 500, 1000];
+
+function getCurrentTimeHHMM(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function getLowStockThreshold(n: Pick<NeedleTypeItem, 'lowStockQty'>): number {
+  return typeof n.lowStockQty === 'number' && Number.isFinite(n.lowStockQty) && n.lowStockQty >= 0
+    ? n.lowStockQty
+    : DEFAULT_LOW_STOCK_QTY;
+}
 
 const SECTION_OPTIONS = [
   'Embroidery Floor',
@@ -74,6 +110,7 @@ export interface NeedleTypeItem {
   ref: string;
   point: string;
   stock: number;
+  lowStockQty: number;
 }
 
 export type NeedleActionType = 'BROKEN' | 'BLUNT' | 'MISSING' | 'SWITCH';
@@ -93,6 +130,45 @@ export interface NeedleRecordLog {
   actionType: NeedleActionType;
 }
 
+export interface ClnSavedDoc {
+  id: number;
+  docNo: string;
+  savedAt: string;
+  date: string;
+  brokenTime: string;
+  letterIssueTime: string;
+  needleIssueTime: string;
+  section: string;
+  production: string;
+  needleSpec: string;
+  epf: string;
+  style: string;
+  operation: string;
+  machine: string;
+  q1Mechanic: string;
+  q1Answer: '' | 'Yes' | 'No';
+  q2Mechanic: string;
+  q2Answer: '' | 'Yes' | 'No';
+  q3Answer: '' | 'Yes' | 'No';
+  metalQty: number;
+  q5Answer: '' | 'Yes' | 'No';
+  searchTime: string;
+  revNo: string;
+  revDate: string;
+}
+
+export interface NeedleStockAdjustmentLog {
+  id: number;
+  adjustedAt: string;
+  needleId: number;
+  needleLabel: string;
+  previousQty: number;
+  newQty: number;
+  diff: number;
+  reason: string;
+  adjustedBy: string;
+}
+
 const DEFAULT_NEEDLE_TYPES: NeedleTypeItem[] = [];
 
 const DEFAULT_RECORD_LOGS: NeedleRecordLog[] = [];
@@ -103,13 +179,16 @@ export type NeedleSubTab =
   | 'cln'
   | 'switchNeedle'
   | 'recordBroken'
-  | 'stockManage';
+  | 'newNeedleType'
+  | 'restockNeedle';
 
 interface NeedleManagementProps {
   employees: EmployeeEntity[];
   machines?: MachineEntity[];
   styles?: StyleMasterEntity[];
   externalSubTab?: NeedleSubTab;
+  userRole?: UserRole | null;
+  userLabel?: string | null;
 }
 
 export function NeedleManagement({
@@ -117,7 +196,10 @@ export function NeedleManagement({
   machines = [],
   styles = [],
   externalSubTab,
+  userRole = null,
+  userLabel = null,
 }: NeedleManagementProps) {
+  const isSuperAdmin = userRole === 'SUPER_ADMIN';
   const [subTab, setSubTab] = useState<NeedleSubTab>(externalSubTab || 'inventory');
 
   useEffect(() => {
@@ -128,8 +210,21 @@ export function NeedleManagement({
     try {
       const saved = localStorage.getItem(STORAGE_TYPES_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved) as NeedleTypeItem[];
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        const parsed = JSON.parse(saved) as Array<Partial<NeedleTypeItem>>;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((n, idx) => ({
+            id: typeof n.id === 'number' ? n.id : Date.now() + idx,
+            system: String(n.system || ''),
+            size: String(n.size || ''),
+            ref: String(n.ref || '-'),
+            point: String(n.point || '-'),
+            stock: Math.max(0, Number(n.stock) || 0),
+            lowStockQty:
+              typeof n.lowStockQty === 'number' && Number.isFinite(n.lowStockQty) && n.lowStockQty >= 0
+                ? n.lowStockQty
+                : DEFAULT_LOW_STOCK_QTY,
+          }));
+        }
       }
     } catch {
       // Ignore storage errors
@@ -167,6 +262,40 @@ export function NeedleManagement({
   const [switchCarriedId, setSwitchCarriedId] = useState<number>(0);
   const [switchRequestedId, setSwitchRequestedId] = useState<number>(0);
 
+  // Super Admin direct stock qty edit modal & audit log
+  const stockEditDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [editingStockNeedle, setEditingStockNeedle] = useState<NeedleTypeItem | null>(null);
+  const [editStockQtyInput, setEditStockQtyInput] = useState<string>('0');
+  const [editStockReasonInput, setEditStockReasonInput] = useState<string>('');
+  const [adminAdjustments, setAdminAdjustments] = useState<NeedleStockAdjustmentLog[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = localStorage.getItem(STORAGE_ADMIN_ADJUSTMENTS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as NeedleStockAdjustmentLog[];
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_ADMIN_ADJUSTMENTS_KEY, JSON.stringify(adminAdjustments));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [adminAdjustments]);
+
+  // Inventory Directory filters & inline low-stock edit / delete confirmation
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventoryStatusFilter, setInventoryStatusFilter] = useState<'ALL' | 'LOW' | 'OK'>('ALL');
+  const [editingThresholdId, setEditingThresholdId] = useState<number | null>(null);
+  const [editingThresholdVal, setEditingThresholdVal] = useState<string>('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
   // Record Broken / Blunt form (all parts must be traced; missing parts go to CLN tab)
   const todayStr = new Date().toISOString().split('T')[0];
   const [brokenDate, setBrokenDate] = useState(todayStr);
@@ -175,7 +304,7 @@ export function NeedleManagement({
   const [brokenMc, setBrokenMc] = useState('');
   const [brokenSeam, setBrokenSeam] = useState('');
   const [brokenNeedleId, setBrokenNeedleId] = useState<number>(0);
-  const [brokenTime, setBrokenTime] = useState('');
+  const [brokenTime, setBrokenTime] = useState(() => getCurrentTimeHHMM());
   const [brokenActionType, setBrokenActionType] = useState<'BROKEN' | 'BLUNT'>('BROKEN');
 
   // New Needle Type form
@@ -184,12 +313,32 @@ export function NeedleManagement({
   const [newRef, setNewRef] = useState('');
   const [newPoint, setNewPoint] = useState('');
   const [newStock, setNewStock] = useState(0);
+  const [newLowStockQty, setNewLowStockQty] = useState(DEFAULT_LOW_STOCK_QTY);
 
   // Bulk Restock form
   const [restockNeedleId, setRestockNeedleId] = useState<number>(0);
   const [restockQty, setRestockQty] = useState(0);
+  const [restockCustomLowQty, setRestockCustomLowQty] = useState<string>('');
 
   // CLN Form fields (100% matching official CLN-01 form)
+  const [savedClnDocs, setSavedClnDocs] = useState<ClnSavedDoc[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = localStorage.getItem(STORAGE_CLN_DOCS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as ClnSavedDoc[];
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return [];
+  });
+  const [editingClnDocId, setEditingClnDocId] = useState<number | null>(null);
+  const [clnSearchQuery, setClnSearchQuery] = useState('');
+  const [clnDateFilter, setClnDateFilter] = useState('');
+  const [confirmDeleteClnId, setConfirmDeleteClnId] = useState<number | null>(null);
+
   const [clnDate, setClnDate] = useState(todayStr);
   const [clnBrokenTime, setClnBrokenTime] = useState('');
   const [clnLetterIssueTime, setClnLetterIssueTime] = useState('');
@@ -228,8 +377,23 @@ export function NeedleManagement({
     }
   }, [recordLogs]);
 
-  const lowStockCount = useMemo(
-    () => needleTypes.filter((n) => n.stock <= LOW_STOCK_THRESHOLD).length,
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_CLN_DOCS_KEY, JSON.stringify(savedClnDocs));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [savedClnDocs]);
+
+  const lowStockItems = useMemo(
+    () => needleTypes.filter((n) => n.stock <= getLowStockThreshold(n)),
+    [needleTypes]
+  );
+
+  const lowStockCount = lowStockItems.length;
+
+  const outOfStockCount = useMemo(
+    () => needleTypes.filter((n) => n.stock <= 0).length,
     [needleTypes]
   );
 
@@ -237,6 +401,168 @@ export function NeedleManagement({
     () => needleTypes.reduce((sum, n) => sum + (n.stock || 0), 0),
     [needleTypes]
   );
+
+  const todayLogsCount = useMemo(
+    () => recordLogs.filter((r) => r.date === todayStr).length,
+    [recordLogs, todayStr]
+  );
+
+  const filteredNeedleTypes = useMemo(() => {
+    const q = inventorySearch.trim().toLowerCase();
+    return needleTypes.filter((n) => {
+      const isLow = n.stock <= getLowStockThreshold(n);
+      if (inventoryStatusFilter === 'LOW' && !isLow) return false;
+      if (inventoryStatusFilter === 'OK' && isLow) return false;
+      if (q) {
+        const match =
+          n.system.toLowerCase().includes(q) ||
+          n.size.toLowerCase().includes(q) ||
+          n.ref.toLowerCase().includes(q) ||
+          n.point.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [needleTypes, inventorySearch, inventoryStatusFilter]);
+
+  const duplicateNewSpec = useMemo(() => {
+    const sys = newSystem.trim().toLowerCase();
+    const sz = newSize.trim().toLowerCase();
+    if (!sys || !sz) return null;
+    return (
+      needleTypes.find(
+        (n) => n.system.toLowerCase() === sys && n.size.toLowerCase() === sz
+      ) || null
+    );
+  }, [needleTypes, newSystem, newSize]);
+
+  const selectedRestockNeedle = useMemo(
+    () => needleTypes.find((n) => n.id === restockNeedleId) || null,
+    [needleTypes, restockNeedleId]
+  );
+
+  const selectedSwitchCarried = useMemo(
+    () => needleTypes.find((n) => n.id === switchCarriedId) || null,
+    [needleTypes, switchCarriedId]
+  );
+
+  const selectedSwitchRequested = useMemo(
+    () => needleTypes.find((n) => n.id === switchRequestedId) || null,
+    [needleTypes, switchRequestedId]
+  );
+
+  const selectedBrokenNeedle = useMemo(
+    () => needleTypes.find((n) => n.id === brokenNeedleId) || null,
+    [needleTypes, brokenNeedleId]
+  );
+
+  const startEditLowStockThreshold = (n: NeedleTypeItem) => {
+    setEditingThresholdId(n.id);
+    setEditingThresholdVal(String(getLowStockThreshold(n)));
+  };
+
+  const commitLowStockThreshold = (n: NeedleTypeItem) => {
+    const parsed = Math.floor(Number(editingThresholdVal));
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > MAX_STOCK_LIMIT) {
+      showError(`Low Stock Alert Qty must be between 0 and ${MAX_STOCK_LIMIT.toLocaleString()} Pcs.`);
+      return;
+    }
+    setNeedleTypes((prev) =>
+      prev.map((item) => (item.id === n.id ? { ...item, lowStockQty: parsed } : item))
+    );
+    setEditingThresholdId(null);
+    showSuccess(
+      `Updated Low Stock Alert Qty for ${n.system} (${n.size}) to ≤ ${parsed.toLocaleString()} Pcs.`
+    );
+  };
+
+  const handleDeleteNeedleType = (n: NeedleTypeItem) => {
+    setNeedleTypes((prev) => prev.filter((item) => item.id !== n.id));
+    if (restockNeedleId === n.id) setRestockNeedleId(0);
+    if (switchCarriedId === n.id) setSwitchCarriedId(0);
+    if (switchRequestedId === n.id) setSwitchRequestedId(0);
+    if (brokenNeedleId === n.id) setBrokenNeedleId(0);
+    setConfirmDeleteId(null);
+    showSuccess(`Removed needle specification ${n.system} (${n.size}).`);
+  };
+
+  const jumpToRestockNeedle = (n: NeedleTypeItem) => {
+    setRestockNeedleId(n.id);
+    setRestockCustomLowQty(String(getLowStockThreshold(n)));
+    setStatusMsg(null);
+    setSubTab('restockNeedle');
+  };
+
+  const openSuperAdminStockEdit = (n: NeedleTypeItem) => {
+    if (!isSuperAdmin) return;
+    setEditingStockNeedle(n);
+    setEditStockQtyInput(String(n.stock));
+    setEditStockReasonInput('');
+    if (stockEditDialogRef.current && !stockEditDialogRef.current.open) {
+      stockEditDialogRef.current.showModal();
+    }
+  };
+
+  const closeSuperAdminStockEdit = () => {
+    if (stockEditDialogRef.current && stockEditDialogRef.current.open) {
+      stockEditDialogRef.current.close();
+    }
+    setEditingStockNeedle(null);
+    setEditStockQtyInput('0');
+    setEditStockReasonInput('');
+  };
+
+  const handleConfirmSuperAdminStockEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin || !editingStockNeedle) return;
+
+    const parsedQty = Math.floor(Number(editStockQtyInput.trim()));
+    if (!Number.isFinite(parsedQty) || parsedQty < 0 || parsedQty > MAX_STOCK_LIMIT * 2) {
+      showError(
+        `Needle stock qty must be between 0 and ${(MAX_STOCK_LIMIT * 2).toLocaleString()} Pcs.`
+      );
+      return;
+    }
+
+    const reasonTrim = editStockReasonInput.trim();
+    if (reasonTrim.length < 3) {
+      showError('Please enter a short reason (at least 3 characters) for this manual qty edit.');
+      return;
+    }
+
+    const prevQty = editingStockNeedle.stock;
+    if (parsedQty === prevQty) {
+      closeSuperAdminStockEdit();
+      return;
+    }
+
+    const targetId = editingStockNeedle.id;
+    const label = `${editingStockNeedle.system} (${editingStockNeedle.size})`;
+
+    setNeedleTypes((prev) =>
+      prev.map((item) => (item.id === targetId ? { ...item, stock: parsedQty } : item))
+    );
+
+    const logEntry: NeedleStockAdjustmentLog = {
+      id: Date.now(),
+      adjustedAt: new Date().toLocaleString(),
+      needleId: targetId,
+      needleLabel: label,
+      previousQty: prevQty,
+      newQty: parsedQty,
+      diff: parsedQty - prevQty,
+      reason: reasonTrim,
+      adjustedBy: userLabel || 'Super Admin',
+    };
+    setAdminAdjustments((prev) => [logEntry, ...prev].slice(0, 50));
+
+    closeSuperAdminStockEdit();
+    showSuccess(
+      `Super Admin Override: Updated ${label} stock from ${prevQty.toLocaleString()} Pcs to ${parsedQty.toLocaleString()} Pcs (${
+        parsedQty - prevQty >= 0 ? `+${parsedQty - prevQty}` : parsedQty - prevQty
+      }).`
+    );
+  };
 
   const filteredLogs = useMemo(() => {
     if (!searchDate) return recordLogs;
@@ -470,6 +796,14 @@ export function NeedleManagement({
       return;
     }
 
+    const lowQtyCount = Math.floor(Number(newLowStockQty));
+    if (!Number.isFinite(lowQtyCount) || lowQtyCount < 0 || lowQtyCount > MAX_STOCK_LIMIT) {
+      showError(
+        `Low Stock Alert Qty must be between 0 and ${MAX_STOCK_LIMIT.toLocaleString()} Pcs.`
+      );
+      return;
+    }
+
     const item: NeedleTypeItem = {
       id: Date.now(),
       system: sys,
@@ -477,6 +811,7 @@ export function NeedleManagement({
       ref: refCode || '-',
       point: pt || '-',
       stock: stockCount,
+      lowStockQty: lowQtyCount,
     };
 
     setNeedleTypes((prev) => [...prev, item]);
@@ -485,7 +820,10 @@ export function NeedleManagement({
     setNewRef('');
     setNewPoint('');
     setNewStock(0);
-    showSuccess(`Added new needle specification ${item.system} (${item.size}).`);
+    setNewLowStockQty(DEFAULT_LOW_STOCK_QTY);
+    showSuccess(
+      `Registered ${item.system} (${item.size}) with ${item.stock.toLocaleString()} Pcs (Low Stock Alert ≤ ${item.lowStockQty.toLocaleString()} Pcs).`
+    );
     setSubTab('inventory');
   };
 
@@ -512,39 +850,221 @@ export function NeedleManagement({
       return;
     }
 
+    let nextLowThreshold = getLowStockThreshold(target);
+    if (restockCustomLowQty.trim() !== '') {
+      const parsedLow = Math.floor(Number(restockCustomLowQty));
+      if (!Number.isFinite(parsedLow) || parsedLow < 0 || parsedLow > MAX_STOCK_LIMIT) {
+        showError(
+          `Low Stock Alert Qty must be between 0 and ${MAX_STOCK_LIMIT.toLocaleString()} Pcs.`
+        );
+        return;
+      }
+      nextLowThreshold = parsedLow;
+    }
+
+    const updatedStock = target.stock + qty;
     setNeedleTypes((prev) =>
-      prev.map((n) => (n.id === restockNeedleId ? { ...n, stock: n.stock + qty } : n))
+      prev.map((n) =>
+        n.id === restockNeedleId
+          ? { ...n, stock: updatedStock, lowStockQty: nextLowThreshold }
+          : n
+      )
     );
     setRestockQty(0);
-    showSuccess(`Added +${qty} Pcs to ${target.system} (${target.size}).`);
+    showSuccess(
+      `Restocked +${qty.toLocaleString()} Pcs to ${target.system} (${target.size}) — New Stock: ${updatedStock.toLocaleString()} Pcs (Alert ≤ ${nextLowThreshold.toLocaleString()}).`
+    );
     setSubTab('inventory');
+  };
+
+  const filteredClnDocs = useMemo(() => {
+    const q = clnSearchQuery.trim().toLowerCase();
+    return savedClnDocs.filter((doc) => {
+      if (clnDateFilter && doc.date !== clnDateFilter) return false;
+      if (q) {
+        const hay = `${doc.docNo} ${doc.style} ${doc.epf} ${doc.machine} ${doc.needleSpec} ${doc.section}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [savedClnDocs, clnSearchQuery, clnDateFilter]);
+
+  const activeEditingClnDoc = useMemo(
+    () => savedClnDocs.find((d) => d.id === editingClnDocId) || null,
+    [savedClnDocs, editingClnDocId]
+  );
+
+  const validateClnForm = (): string | null => {
+    const missing: string[] = [];
+    if (!clnDate || clnDate > todayStr) missing.push('Valid Date (today or earlier)');
+    if (!clnSection) missing.push('Section');
+    if (!clnProduction) missing.push('Production');
+    if (!clnNeedleSpec) missing.push('Needle Type & Size');
+    if (!clnEpf) missing.push('Operator EPF No');
+    if (!clnStyle.trim()) missing.push('Style No');
+    if (!clnOperation) missing.push('Operation');
+    if (!clnMachine) missing.push('Machine Number');
+    if (!clnQ1Answer) missing.push('Q1 (Yes/No)');
+    if (!clnQ2Answer) missing.push('Q2 (Yes/No)');
+    if (!clnQ3Answer) missing.push('Q3 (Yes/No)');
+    if (!clnQ5Answer) missing.push('Q5 (Yes/No)');
+    if (!clnSearchTime) missing.push('Q6 (Search Time)');
+
+    if (missing.length > 0) {
+      return `CLN-01: Please complete: ${missing.join(', ')}.`;
+    }
+    if (clnMetalQty < 0 || clnMetalQty > 10000) {
+      return 'CLN-01: Quantity of metal detected must be between 0 and 10,000.';
+    }
+    return null;
+  };
+
+  const handleNewBlankCln = () => {
+    setEditingClnDocId(null);
+    setClnDate(todayStr);
+    setClnBrokenTime('');
+    setClnLetterIssueTime('');
+    setClnNeedleIssueTime('');
+    setClnSection('');
+    setClnProduction('');
+    setClnNeedleSpec('');
+    setClnEpf('');
+    setClnStyle('');
+    setClnOperation('');
+    setClnMachine('');
+    setClnQ1Mechanic('');
+    setClnQ1Answer('');
+    setClnQ2Mechanic('');
+    setClnQ2Answer('');
+    setClnQ3Answer('');
+    setClnMetalQty(0);
+    setClnQ5Answer('');
+    setClnSearchTime('');
+    setClnRevNo('');
+    setClnRevDate('');
+    setStatusMsg(null);
+  };
+
+  const handleLoadClnDoc = (doc: ClnSavedDoc, silent = false) => {
+    setEditingClnDocId(doc.id);
+    setClnDate(doc.date);
+    setClnBrokenTime(doc.brokenTime);
+    setClnLetterIssueTime(doc.letterIssueTime);
+    setClnNeedleIssueTime(doc.needleIssueTime);
+    setClnSection(doc.section);
+    setClnProduction(doc.production);
+    setClnNeedleSpec(doc.needleSpec);
+    setClnEpf(doc.epf);
+    setClnStyle(doc.style);
+    setClnOperation(doc.operation);
+    setClnMachine(doc.machine);
+    setClnQ1Mechanic(doc.q1Mechanic);
+    setClnQ1Answer(doc.q1Answer);
+    setClnQ2Mechanic(doc.q2Mechanic);
+    setClnQ2Answer(doc.q2Answer);
+    setClnQ3Answer(doc.q3Answer);
+    setClnMetalQty(doc.metalQty);
+    setClnQ5Answer(doc.q5Answer);
+    setClnSearchTime(doc.searchTime);
+    setClnRevNo(doc.revNo);
+    setClnRevDate(doc.revDate);
+    if (!silent) {
+      showSuccess(`Loaded saved checklist ${doc.docNo} (${doc.date} • ${doc.style}).`);
+    }
+  };
+
+  const handleSaveClnDoc = (andPrint = false): boolean => {
+    const err = validateClnForm();
+    if (err) {
+      showError(err);
+      return false;
+    }
+
+    const nowIso = new Date().toISOString();
+    const existing = editingClnDocId
+      ? savedClnDocs.find((d) => d.id === editingClnDocId)
+      : undefined;
+
+    let docNo = existing?.docNo || '';
+    if (!docNo) {
+      const dateCompact = clnDate.replaceAll('-', '');
+      const sameDayCount = savedClnDocs.filter((d) => d.date === clnDate).length + 1;
+      docNo = `CLN-${dateCompact}-${String(sameDayCount).padStart(2, '0')}`;
+      let suffix = sameDayCount;
+      while (savedClnDocs.some((d) => d.docNo === docNo)) {
+        suffix += 1;
+        docNo = `CLN-${dateCompact}-${String(suffix).padStart(2, '0')}`;
+      }
+    }
+
+    const nextDoc: ClnSavedDoc = {
+      id: existing ? existing.id : Date.now(),
+      docNo,
+      savedAt: nowIso,
+      date: clnDate,
+      brokenTime: clnBrokenTime,
+      letterIssueTime: clnLetterIssueTime,
+      needleIssueTime: clnNeedleIssueTime,
+      section: clnSection,
+      production: clnProduction,
+      needleSpec: clnNeedleSpec,
+      epf: clnEpf,
+      style: clnStyle.trim(),
+      operation: clnOperation,
+      machine: clnMachine,
+      q1Mechanic: clnQ1Mechanic.trim(),
+      q1Answer: clnQ1Answer,
+      q2Mechanic: clnQ2Mechanic.trim(),
+      q2Answer: clnQ2Answer,
+      q3Answer: clnQ3Answer,
+      metalQty: clnMetalQty,
+      q5Answer: clnQ5Answer,
+      searchTime: clnSearchTime,
+      revNo: clnRevNo.trim(),
+      revDate: clnRevDate.trim(),
+    };
+
+    setSavedClnDocs((prev) =>
+      existing ? prev.map((d) => (d.id === existing.id ? nextDoc : d)) : [nextDoc, ...prev]
+    );
+    setEditingClnDocId(nextDoc.id);
+
+    if (andPrint) {
+      setStatusMsg(null);
+      setTimeout(() => {
+        window.print();
+      }, 80);
+    } else {
+      showSuccess(
+        existing
+          ? `Updated saved checklist ${nextDoc.docNo}.`
+          : `Saved CLN-01 checklist ${nextDoc.docNo} to archive list.`
+      );
+    }
+    return true;
+  };
+
+  const handlePrintSavedClnDoc = (doc: ClnSavedDoc) => {
+    handleLoadClnDoc(doc, true);
+    setStatusMsg(null);
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  const handleDeleteClnDoc = (doc: ClnSavedDoc) => {
+    setSavedClnDocs((prev) => prev.filter((d) => d.id !== doc.id));
+    if (editingClnDocId === doc.id) {
+      setEditingClnDocId(null);
+    }
+    setConfirmDeleteClnId(null);
+    showSuccess(`Deleted saved checklist ${doc.docNo}.`);
   };
 
   const handlePrintActiveView = () => {
     if (subTab === 'cln') {
-      const missing: string[] = [];
-      if (!clnDate || clnDate > todayStr) missing.push('Valid Date (today or earlier)');
-      if (!clnSection) missing.push('Section');
-      if (!clnProduction) missing.push('Production');
-      if (!clnNeedleSpec) missing.push('Needle Type & Size');
-      if (!clnEpf) missing.push('Operator EPF No');
-      if (!clnStyle.trim()) missing.push('Style No');
-      if (!clnOperation) missing.push('Operation');
-      if (!clnMachine) missing.push('Machine Number');
-      if (!clnQ1Answer) missing.push('Q1 (Yes/No)');
-      if (!clnQ2Answer) missing.push('Q2 (Yes/No)');
-      if (!clnQ3Answer) missing.push('Q3 (Yes/No)');
-      if (!clnQ5Answer) missing.push('Q5 (Yes/No)');
-      if (!clnSearchTime) missing.push('Q6 (Search Time)');
-
-      if (missing.length > 0) {
-        showError(`CLN-01: Please complete: ${missing.join(', ')}.`);
-        return;
-      }
-      if (clnMetalQty < 0 || clnMetalQty > 10000) {
-        showError('CLN-01: Quantity of metal detected must be between 0 and 10,000.');
-        return;
-      }
+      handleSaveClnDoc(true);
+      return;
     }
     setStatusMsg(null);
     window.print();
@@ -553,53 +1073,133 @@ export function NeedleManagement({
   return (
     <div className="space-y-5">
       {/* Studio Command Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 shadow-md flex flex-wrap items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-amber-400/15 border border-amber-400/30 text-amber-300 flex items-center justify-center shrink-0">
-            <Pin className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-lg font-extrabold tracking-tight">NEEDLE &amp; SAFETY STUDIO</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 inline-flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3" /> Tesco Audit Compliant
-              </span>
+      <div className="bg-persian-800 text-white rounded-2xl p-5 shadow-md border border-persian-900 space-y-4 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/20 text-amber-300 flex items-center justify-center shrink-0 shadow-inner">
+              <Pin className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Groz-Beckert stock control ({totalStockPcs.toLocaleString()} Pcs), broken/switch log &amp; CLN-01 missing needle checklist.
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-extrabold tracking-tight uppercase">
+                  Needle &amp; Safety Studio
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 inline-flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" /> Tesco Audit Compliant
+                </span>
+              </div>
+              <p className="text-xs text-blue-200/90 mt-0.5">
+                Groz-Beckert needle inventory, custom low-stock alerts, broken/switch tracking &amp; CLN-01 safety checklist.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {lowStockCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusMsg(null);
+                  setSubTab('restockNeedle');
+                }}
+                className="px-3 py-2 rounded-xl bg-rose-500/25 hover:bg-rose-500/35 border border-rose-300/40 text-rose-100 text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-300" />
+                <span>{lowStockCount} Low Stock — Restock</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handlePrintActiveView}
+              className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-persian-950 font-extrabold text-xs transition shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" /> Print Active View
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {lowStockCount > 0 && (
-            <span className="px-3 py-1.5 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-200 text-xs font-bold flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
-              {lowStockCount} Low Stock
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handlePrintActiveView}
-            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition shadow-sm flex items-center gap-1.5 cursor-pointer"
+        {/* 4-Card KPI Strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+          <div className="bg-persian-900/60 border border-persian-700/70 rounded-xl px-3.5 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200/80">
+              Total Needles in Stock
+            </div>
+            <div className="text-lg font-mono font-black text-white mt-0.5">
+              {totalStockPcs.toLocaleString()} <span className="text-xs font-sans font-semibold text-blue-200">Pcs</span>
+            </div>
+          </div>
+          <div className="bg-persian-900/60 border border-persian-700/70 rounded-xl px-3.5 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200/80">
+              Registered Specs
+            </div>
+            <div className="text-lg font-mono font-black text-white mt-0.5">
+              {needleTypes.length} <span className="text-xs font-sans font-semibold text-blue-200">Types</span>
+            </div>
+          </div>
+          <div
+            className={`rounded-xl px-3.5 py-2.5 border ${
+              lowStockCount > 0
+                ? 'bg-rose-950/60 border-rose-400/50'
+                : 'bg-persian-900/60 border-persian-700/70'
+            }`}
           >
-            <Printer className="w-4 h-4" /> Print Active View
-          </button>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200/80">
+              Low / Out of Stock
+            </div>
+            <div
+              className={`text-lg font-mono font-black mt-0.5 ${
+                lowStockCount > 0 ? 'text-rose-300' : 'text-emerald-300'
+              }`}
+            >
+              {lowStockCount}{' '}
+              <span className="text-xs font-sans font-semibold opacity-80">
+                ({outOfStockCount} Empty)
+              </span>
+            </div>
+          </div>
+          <div className="bg-persian-900/60 border border-persian-700/70 rounded-xl px-3.5 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200/80">
+              Today&apos;s Floor Records
+            </div>
+            <div className="text-lg font-mono font-black text-amber-300 mt-0.5">
+              {todayLogsCount}{' '}
+              <span className="text-xs font-sans font-semibold text-blue-200">
+                ({recordLogs.length} Total)
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Sub-Navigation Tabs */}
+      {/* Sub-Navigation Tabs (Clean & Dedicated Tabs for New Needle Type vs Restock) */}
       <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-2 flex flex-wrap items-center justify-between gap-2 print:hidden">
         <div className="flex flex-wrap items-center gap-1.5">
           {(
             [
-              { id: 'inventory', label: 'Stock Directory', icon: Boxes },
-              { id: 'recordSheet', label: 'Broken & Issued Sheet', icon: FileText },
-              { id: 'cln', label: 'Missing Checklist (CLN)', icon: ShieldAlert },
+              { id: 'inventory', label: 'Stock Directory', icon: Boxes, badge: needleTypes.length },
+              { id: 'newNeedleType', label: 'New Needle Type', icon: PlusCircle },
+              {
+                id: 'restockNeedle',
+                label: 'Restock Inventory',
+                icon: PackagePlus,
+                alertBadge: lowStockCount > 0 ? lowStockCount : undefined,
+              },
               { id: 'switchNeedle', label: 'Switch Needle', icon: RefreshCw },
               { id: 'recordBroken', label: 'Record Broken', icon: AlertTriangle },
-              { id: 'stockManage', label: 'New Type & Restock', icon: PackagePlus },
-            ] as const
+              { id: 'recordSheet', label: 'Broken & Issued Sheet', icon: FileText },
+              {
+                id: 'cln',
+                label: 'Missing Checklist (CLN)',
+                icon: ShieldAlert,
+                badge: savedClnDocs.length,
+              },
+            ] as Array<{
+              id: NeedleSubTab;
+              label: string;
+              icon: React.ComponentType<{ className?: string }>;
+              badge?: number;
+              alertBadge?: number;
+            }>
           ).map((tab) => {
             const Icon = tab.icon;
             const active = subTab === tab.id;
@@ -611,15 +1211,32 @@ export function NeedleManagement({
                   setStatusMsg(null);
                   setSubTab(tab.id);
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${active
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : tab.id === 'switchNeedle'
-                      ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border ${
+                  active
+                    ? 'bg-persian-800 text-white border-persian-900 shadow-xs'
+                    : tab.id === 'restockNeedle' && lowStockCount > 0
+                      ? 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                      : tab.id === 'newNeedleType'
+                        ? 'bg-indigo-50/70 text-indigo-900 border-indigo-200 hover:bg-indigo-100'
+                        : 'bg-white text-slate-600 border-transparent hover:bg-slate-100 hover:text-slate-900'
+                }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                <span>{tab.label}</span>
+                {typeof tab.badge === 'number' && tab.badge > 0 && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                      active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+                {typeof tab.alertBadge === 'number' && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-600 text-white">
+                    {tab.alertBadge} Low
+                  </span>
+                )}
               </button>
             );
           })}
@@ -629,17 +1246,29 @@ export function NeedleManagement({
       {/* Status Banner */}
       {statusMsg && (
         <div
-          className={`px-4 py-3 rounded-xl border text-xs font-semibold flex items-center gap-2 print:hidden ${statusMsg.type === 'success'
+          role={statusMsg.type === 'error' ? 'alert' : 'status'}
+          className={`px-4 py-3 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 print:hidden ${
+            statusMsg.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
               : 'bg-rose-50 border-rose-200 text-rose-900'
-            }`}
+          }`}
         >
-          {statusMsg.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-          )}
-          <span>{statusMsg.text}</span>
+          <div className="flex items-center gap-2">
+            {statusMsg.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{statusMsg.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusMsg(null)}
+            aria-label="Dismiss notification"
+            className="p-1 rounded-lg hover:bg-black/5 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -656,137 +1285,461 @@ export function NeedleManagement({
       {subTab === 'inventory' && (
         <div className="space-y-5">
           {needleTypes.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center space-y-3">
-              <Boxes className="w-10 h-10 text-slate-300 mx-auto" />
-              <div className="space-y-1">
-                <h3 className="text-sm font-extrabold text-slate-800">
-                  No Needle Types Added Yet
+            <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center space-y-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                <Boxes className="w-7 h-7" />
+              </div>
+              <div className="space-y-1 max-w-md mx-auto">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  No Needle Types Registered Yet
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Add your factory needle specifications first to track stock, switches, and broken records.
+                  Start by registering your factory needle specifications (System, Size, Initial Stock &amp; Low Stock Alert Qty) in the New Needle Type tab.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setSubTab('stockManage')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-indigo-700 text-white text-xs font-bold transition cursor-pointer"
+                onClick={() => setSubTab('newNeedleType')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-persian-800 hover:bg-persian-600 text-white text-xs font-extrabold transition shadow-sm cursor-pointer"
               >
-                <PlusCircle className="w-3.5 h-3.5" />
-                Add Needle Type
+                <PlusCircle className="w-4 h-4" />
+                Register First Needle Type
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-              {needleTypes.map((n) => {
-                const isLow = n.stock <= LOW_STOCK_THRESHOLD;
-                return (
-                  <div
-                    key={n.id}
-                    className={`bg-white p-4 rounded-2xl border shadow-xs flex flex-col justify-between ${isLow ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200/90'
-                      }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-1 mb-1.5">
-                        <span className="bg-slate-900 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-md uppercase">
-                          {n.system}
-                        </span>
-                        <span className="text-[10px] font-mono font-semibold text-slate-400">
-                          Ref: {n.ref}
-                        </span>
-                      </div>
-                      <h4 className="font-black text-slate-900 text-sm">Size: {n.size}</h4>
-                      <p className="text-[11px] font-medium text-slate-500">Variant: {n.point}</p>
-                    </div>
-
-                    <div className="mt-3 space-y-2">
-                      {isLow && (
-                        <div className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 font-extrabold text-[10px] px-2 py-0.5 rounded-md border border-rose-200">
-                          <AlertTriangle className="w-3 h-3" /> LOW STOCK
-                        </div>
-                      )}
-                      <div className="pt-2 border-t border-slate-100 flex justify-between items-baseline">
-                        <span className="text-[11px] font-bold text-slate-500">In Stock</span>
-                        <span
-                          className={`text-lg font-mono font-black ${isLow ? 'text-rose-600' : 'text-emerald-700'
-                            }`}
-                        >
-                          {n.stock} <span className="text-[11px] font-sans">Pcs</span>
-                        </span>
-                      </div>
-                    </div>
+            <>
+              {/* Search, Filter & Quick Actions Bar */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-3.5 flex flex-wrap items-center justify-between gap-3 print:hidden">
+                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search system, size, ref, point..."
+                      value={inventorySearch}
+                      onChange={(e) => setInventorySearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-persian-500"
+                    />
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                    {(
+                      [
+                        { id: 'ALL', label: `All (${needleTypes.length})` },
+                        { id: 'LOW', label: `Low Stock (${lowStockCount})` },
+                        { id: 'OK', label: `Optimal (${needleTypes.length - lowStockCount})` },
+                      ] as const
+                    ).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setInventoryStatusFilter(f.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          inventoryStatusFilter === f.id
+                            ? 'bg-white text-persian-800 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                Detailed Needle Inventory Ledger (Threshold ≤ {LOW_STOCK_THRESHOLD} Pcs)
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-500">
-                Total Types: {needleTypes.length}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-900 text-white uppercase text-[11px] font-bold">
-                  <tr>
-                    <th className="py-3 px-4">Ref Code</th>
-                    <th className="py-3 px-4">Needle System</th>
-                    <th className="py-3 px-4">Size (Nm)</th>
-                    <th className="py-3 px-4">Point Variant</th>
-                    <th className="py-3 px-4">In Stock</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Quick Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {needleTypes.map((n) => {
-                    const isLow = n.stock <= LOW_STOCK_THRESHOLD;
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('newNeedleType')}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>New Needle Type</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('restockNeedle')}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                  >
+                    <PackagePlus className="w-3.5 h-3.5" />
+                    <span>Restock Stock</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modern Visual Stock Cards */}
+              {filteredNeedleTypes.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-500">
+                  No needle specs match your current search / filter.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
+                  {filteredNeedleTypes.map((n) => {
+                    const threshold = getLowStockThreshold(n);
+                    const isEmpty = n.stock <= 0;
+                    const isLow = n.stock <= threshold;
+                    const progressTarget = Math.max(threshold * 2, 100);
+                    const healthPct = Math.min(100, Math.round((n.stock / progressTarget) * 100));
+
                     return (
-                      <tr key={n.id} className="hover:bg-slate-50/80 transition">
-                        <td className="py-3 px-4 font-mono font-bold text-indigo-700">{n.ref}</td>
-                        <td className="py-3 px-4 font-bold text-slate-900">{n.system}</td>
-                        <td className="py-3 px-4 font-extrabold text-slate-800">{n.size}</td>
-                        <td className="py-3 px-4 text-slate-600">{n.point}</td>
-                        <td
-                          className={`py-3 px-4 font-mono font-black ${isLow ? 'text-rose-600' : 'text-emerald-700'
-                            }`}
-                        >
-                          {n.stock} Pcs
-                        </td>
-                        <td className="py-3 px-4">
-                          {isLow ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
-                              LOW STOCK WARNING
+                      <div
+                        key={n.id}
+                        className={`bg-white p-4 rounded-2xl border shadow-xs flex flex-col justify-between transition hover:shadow-md ${
+                          isEmpty
+                            ? 'border-rose-400 ring-2 ring-rose-100'
+                            : isLow
+                              ? 'border-amber-300 ring-2 ring-amber-50'
+                              : 'border-slate-200/90'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1.5 mb-2">
+                            <span className="bg-persian-800 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-md uppercase tracking-wide">
+                              {n.system}
                             </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              Optimal Stock
+                            {isEmpty ? (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-600 text-white uppercase">
+                                Out of Stock
+                              </span>
+                            ) : isLow ? (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-300 uppercase">
+                                Low Stock
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                                Optimal
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-black text-slate-900 text-base leading-tight">
+                            Size {n.size}
+                          </h4>
+                          <div className="text-[11px] font-semibold text-slate-500 mt-0.5 flex items-center justify-between gap-1">
+                            <span className="truncate">Point: {n.point}</span>
+                            <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                              Ref: {n.ref}
                             </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRestockNeedleId(n.id);
-                              setSubTab('stockManage');
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 font-bold text-[11px] transition cursor-pointer"
-                          >
-                            + Restock
-                          </button>
-                        </td>
-                      </tr>
+                          </div>
+                        </div>
+
+                        <div className="mt-3.5 space-y-2">
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">
+                              Available
+                            </span>
+                            <span
+                              className={`text-xl font-mono font-black ${
+                                isEmpty
+                                  ? 'text-rose-600'
+                                  : isLow
+                                    ? 'text-amber-600'
+                                    : 'text-emerald-700'
+                              }`}
+                            >
+                              {n.stock.toLocaleString()}{' '}
+                              <span className="text-[10px] font-sans font-bold text-slate-400">
+                                Pcs
+                              </span>
+                            </span>
+                          </div>
+
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/70">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                isEmpty
+                                  ? 'bg-rose-600'
+                                  : isLow
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.max(healthPct, isEmpty ? 0 : 8)}%` }}
+                            />
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 font-mono">
+                              Alert ≤ {threshold.toLocaleString()}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {isSuperAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => openSuperAdminStockEdit(n)}
+                                  title="Super Admin: Direct Edit Current Qty"
+                                  className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-500 text-amber-800 hover:text-white border border-amber-300 text-[10px] font-extrabold transition cursor-pointer inline-flex items-center gap-0.5"
+                                >
+                                  <Pencil className="w-2.5 h-2.5" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => jumpToRestockNeedle(n)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer ${
+                                  isLow
+                                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                    : 'bg-slate-100 hover:bg-persian-800 hover:text-white text-slate-700'
+                                }`}
+                              >
+                                + Restock
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </div>
+              )}
+
+              {/* Detailed Needle Inventory Ledger */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="w-4 h-4 text-persian-600" />
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+                      Detailed Needle Inventory Ledger
+                    </h3>
+                    {isSuperAdmin && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1 print:hidden">
+                        <ShieldCheck className="w-3 h-3 text-amber-700" />
+                        Super Admin Qty Edit Enabled
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Click any Low Stock Qty to adjust its alert threshold • Showing {filteredNeedleTypes.length} of {needleTypes.length}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-slate-900 text-white uppercase text-[11px] font-bold">
+                      <tr>
+                        <th className="py-3 px-4">Ref Code</th>
+                        <th className="py-3 px-4">Needle System</th>
+                        <th className="py-3 px-4">Size (Nm)</th>
+                        <th className="py-3 px-4">Point Variant</th>
+                        <th className="py-3 px-4">In Stock</th>
+                        <th className="py-3 px-4">Low Stock Alert Qty</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right print:hidden">Quick Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredNeedleTypes.map((n) => {
+                        const threshold = getLowStockThreshold(n);
+                        const isEmpty = n.stock <= 0;
+                        const isLow = n.stock <= threshold;
+                        const isEditingThreshold = editingThresholdId === n.id;
+                        const isConfirmingDelete = confirmDeleteId === n.id;
+
+                        return (
+                          <tr key={n.id} className="hover:bg-slate-50/80 transition">
+                            <td className="py-3 px-4 font-mono font-bold text-indigo-700">
+                              {n.ref}
+                            </td>
+                            <td className="py-3 px-4 font-extrabold text-slate-900">{n.system}</td>
+                            <td className="py-3 px-4 font-extrabold text-slate-800">{n.size}</td>
+                            <td className="py-3 px-4 text-slate-600 font-medium">{n.point}</td>
+                            <td
+                              className={`py-3 px-4 font-mono font-black ${
+                                isEmpty
+                                  ? 'text-rose-600'
+                                  : isLow
+                                    ? 'text-amber-600'
+                                    : 'text-emerald-700'
+                              }`}
+                            >
+                              {n.stock.toLocaleString()} Pcs
+                            </td>
+                            <td className="py-3 px-4">
+                              {isEditingThreshold ? (
+                                <div className="inline-flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={MAX_STOCK_LIMIT}
+                                    autoFocus
+                                    value={editingThresholdVal}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={(e) => setEditingThresholdVal(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        commitLowStockThreshold(n);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingThresholdId(null);
+                                      }
+                                    }}
+                                    className="w-20 px-2 py-1 rounded-lg border-2 border-persian-500 bg-white font-mono font-bold text-xs text-persian-900 outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => commitLowStockThreshold(n)}
+                                    aria-label="Save alert threshold"
+                                    className="p-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingThresholdId(null)}
+                                    aria-label="Cancel threshold edit"
+                                    className="p-1 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditLowStockThreshold(n)}
+                                  title="Click to edit Low Stock Alert Qty"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-700 font-mono font-bold transition cursor-pointer"
+                                >
+                                  <span>≤ {threshold.toLocaleString()} Pcs</span>
+                                  <Pencil className="w-3 h-3 text-slate-400" />
+                                </button>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {isEmpty ? (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white">
+                                  OUT OF STOCK
+                                </span>
+                              ) : isLow ? (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                                  LOW STOCK
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  Optimal Stock
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right print:hidden">
+                              <div className="inline-flex items-center gap-1.5">
+                                {isSuperAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openSuperAdminStockEdit(n)}
+                                    title="Super Admin: Direct Edit Current Stock Qty"
+                                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-500 text-amber-900 hover:text-white border border-amber-300 font-extrabold text-[11px] inline-flex items-center gap-1 transition cursor-pointer"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    <span>Edit Qty</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => jumpToRestockNeedle(n)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-200 font-bold text-[11px] transition cursor-pointer"
+                                >
+                                  + Restock
+                                </button>
+                                {isConfirmingDelete ? (
+                                  <div className="inline-flex items-center gap-1 bg-rose-50 border border-rose-300 rounded-lg px-2 py-0.5">
+                                    <span className="text-[10px] font-extrabold text-rose-800">
+                                      Delete?
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteNeedleType(n)}
+                                      className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                    >
+                                      Yes
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteId(null)}
+                                      className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(n.id)}
+                                    aria-label={`Delete ${n.system} ${n.size}`}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Super Admin Manual Qty Adjustment Audit Trail */}
+              {isSuperAdmin && adminAdjustments.length > 0 && (
+                <div className="bg-white rounded-2xl border border-amber-200 shadow-xs overflow-hidden print:hidden">
+                  <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/70 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-700" />
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-950">
+                        Super Admin Manual Qty Adjustment History ({adminAdjustments.length})
+                      </h3>
+                    </div>
+                    <span className="text-[10px] font-bold text-amber-800">
+                      Visible to Super Admin Only
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-52 overflow-y-auto">
+                    <table className="w-full text-left text-xs whitespace-nowrap">
+                      <thead className="bg-slate-100 text-slate-600 uppercase text-[10px] font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 px-4">Date &amp; Time</th>
+                          <th className="py-2 px-4">Needle Spec</th>
+                          <th className="py-2 px-4">Old → New Qty</th>
+                          <th className="py-2 px-4">Reason</th>
+                          <th className="py-2 px-4">Adjusted By</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {adminAdjustments.map((adj) => (
+                          <tr key={adj.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-4 font-mono text-[11px] text-slate-600">
+                              {adj.adjustedAt}
+                            </td>
+                            <td className="py-2 px-4 font-bold text-slate-900">
+                              {adj.needleLabel}
+                            </td>
+                            <td className="py-2 px-4 font-mono font-extrabold">
+                              <span className="text-slate-500">
+                                {adj.previousQty.toLocaleString()}
+                              </span>{' '}
+                              →{' '}
+                              <span className="text-persian-800">
+                                {adj.newQty.toLocaleString()} Pcs
+                              </span>{' '}
+                              <span
+                                className={`ml-1 text-[10px] px-1.5 py-0.2 rounded ${
+                                  adj.diff >= 0
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                }`}
+                              >
+                                {adj.diff >= 0 ? `+${adj.diff}` : adj.diff}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4 text-slate-700 font-medium">{adj.reason}</td>
+                            <td className="py-2 px-4 text-slate-500 font-semibold">
+                              {adj.adjustedBy}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -936,7 +1889,233 @@ export function NeedleManagement({
       {/* TAB 3: MISSING NEEDLE PARTS CHECKLIST (CLN-01 — 100% OFFICIAL) */}
       {/* ================================================================= */}
       {subTab === 'cln' && (
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 max-w-4xl mx-auto text-black print:max-w-none print:w-full print:border-none print:shadow-none print:p-0">
+        <div className="space-y-5">
+          {/* Saved CLN-01 Documents Archive List (Hidden on Print) */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden print:hidden">
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-persian-50 text-persian-700 flex items-center justify-center">
+                  <FolderOpen className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+                    Saved CLN-01 Missing Needle Checklists ({savedClnDocs.length})
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Save karapu hama CLN-01 document ekakma methana thiyenawa — ona welawaka select karala load / print karanna
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search Doc No, Style, EPF..."
+                    value={clnSearchQuery}
+                    onChange={(e) => setClnSearchQuery(e.target.value)}
+                    className="pl-8 pr-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:border-persian-500 w-48"
+                  />
+                </div>
+                <input
+                  type="date"
+                  value={clnDateFilter}
+                  onChange={(e) => setClnDateFilter(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-mono font-semibold outline-none focus:border-persian-500"
+                />
+                {(clnSearchQuery || clnDateFilter) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClnSearchQuery('');
+                      setClnDateFilter('');
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleNewBlankCln}
+                  className="px-3.5 py-1.5 rounded-xl bg-persian-800 hover:bg-persian-600 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>New Blank CLN</span>
+                </button>
+              </div>
+            </div>
+
+            {savedClnDocs.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">
+                Thama saved CLN-01 documents na. Pahala checklist eka fill karala{' '}
+                <strong>Save CLN Document</strong> click kalama methanata add wenawa.
+              </div>
+            ) : filteredClnDocs.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">
+                No saved CLN documents match your search / date filter.
+              </div>
+            ) : (
+              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-900 text-white uppercase text-[10px] font-bold sticky top-0 z-10">
+                    <tr>
+                      <th className="py-2.5 px-4">Doc No</th>
+                      <th className="py-2.5 px-4">Date &amp; Time</th>
+                      <th className="py-2.5 px-4">Style &amp; Machine</th>
+                      <th className="py-2.5 px-4">Operator &amp; Needle</th>
+                      <th className="py-2.5 px-4">Search / Metal</th>
+                      <th className="py-2.5 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredClnDocs.map((doc) => {
+                      const isLoaded = editingClnDocId === doc.id;
+                      const isConfirmDel = confirmDeleteClnId === doc.id;
+                      return (
+                        <tr
+                          key={doc.id}
+                          className={`transition ${
+                            isLoaded ? 'bg-indigo-50/80' : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="py-2.5 px-4 font-mono font-extrabold text-persian-800">
+                            <div className="flex items-center gap-1.5">
+                              <span>{doc.docNo}</span>
+                              {isLoaded && (
+                                <span className="px-1.5 py-0.2 rounded bg-persian-800 text-white text-[9px] font-bold font-sans uppercase">
+                                  Loaded
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4 font-mono text-slate-700">
+                            <div className="font-bold">{doc.date}</div>
+                            <div className="text-[10px] text-slate-400">
+                              Broken: {doc.brokenTime || '—'}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <div className="font-bold text-slate-900">{doc.style}</div>
+                            <div className="text-[10px] text-slate-500">
+                              {doc.machine} • {doc.section}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <div className="font-semibold text-slate-800">{doc.epf}</div>
+                            <div className="text-[10px] font-mono text-indigo-700">
+                              {doc.needleSpec}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4 text-[11px]">
+                            <div className="font-semibold text-slate-700">
+                              Search: {doc.searchTime}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              Metal Qty: {doc.metalQty}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadClnDoc(doc)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 font-bold text-[11px] transition cursor-pointer"
+                              >
+                                View / Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePrintSavedClnDoc(doc)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-persian-950 font-extrabold text-[11px] inline-flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                              >
+                                <Printer className="w-3 h-3" />
+                                <span>Print</span>
+                              </button>
+                              {isConfirmDel ? (
+                                <div className="inline-flex items-center gap-1 bg-rose-50 border border-rose-300 rounded-lg px-2 py-0.5">
+                                  <span className="text-[10px] font-extrabold text-rose-800">
+                                    Del?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteClnDoc(doc)}
+                                    className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteClnId(null)}
+                                    className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteClnId(doc.id)}
+                                  aria-label={`Delete ${doc.docNo}`}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Active CLN-01 Save / Print Toolbar (Hidden on Print) */}
+          <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-slate-200/90 shadow-xs px-4 py-3 flex flex-wrap items-center justify-between gap-3 print:hidden">
+            <div className="flex items-center gap-2">
+              {activeEditingClnDoc ? (
+                <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-indigo-50 text-indigo-800 border border-indigo-200 font-mono">
+                  Viewing / Editing: {activeEditingClnDoc.docNo}
+                </span>
+              ) : (
+                <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                  New Unsaved CLN-01 Document
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleNewBlankCln}
+                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                + New Blank
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveClnDoc(false)}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{activeEditingClnDoc ? 'Update Saved CLN' : 'Save CLN Document'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveClnDoc(true)}
+                className="px-4 py-2 rounded-xl bg-persian-800 hover:bg-persian-600 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-300" />
+                <span>Save &amp; Print CLN</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Official Printable CLN-01 Sheet */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 max-w-4xl mx-auto text-black print:max-w-none print:w-full print:border-none print:shadow-none print:p-0">
           <style
             dangerouslySetInnerHTML={{
               __html: `
@@ -1097,6 +2276,10 @@ export function NeedleManagement({
                       className="cln-select w-full font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-[11px]"
                     >
                       <option value="">-- Select EPF --</option>
+                      {clnEpf &&
+                        !employees.some((emp) => `EPF ${emp.epfNo} - ${emp.fullName}` === clnEpf) && (
+                          <option value={clnEpf}>{clnEpf}</option>
+                        )}
                       {employees.map((emp) => (
                         <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
                           EPF #{emp.epfNo} - {emp.fullName}
@@ -1121,6 +2304,9 @@ export function NeedleManagement({
                         className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]"
                       >
                         <option value="">-- Select Style --</option>
+                        {clnStyle && !styleOptions.includes(clnStyle) && (
+                          <option value={clnStyle}>{clnStyle}</option>
+                        )}
                         {styleOptions.map((st) => (
                           <option key={st} value={st}>
                             {st}
@@ -1146,6 +2332,9 @@ export function NeedleManagement({
                       className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]"
                     >
                       <option value="">-- Select Operation --</option>
+                      {clnOperation && !operationOptions.includes(clnOperation) && (
+                        <option value={clnOperation}>{clnOperation}</option>
+                      )}
                       {operationOptions.map((op) => (
                         <option key={op} value={op}>
                           {op}
@@ -1161,6 +2350,9 @@ export function NeedleManagement({
                       className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]"
                     >
                       <option value="">-- Select Machine --</option>
+                      {clnMachine && !machineOptions.includes(clnMachine) && (
+                        <option value={clnMachine}>{clnMachine}</option>
+                      )}
                       {machineOptions.map((mc) => (
                         <option key={mc} value={mc}>
                           {mc}
@@ -1442,443 +2634,1170 @@ export function NeedleManagement({
               </div>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {/* ================================================================= */}
-      {/* TAB 4: SWITCH NEEDLE */}
+      {/* TAB 4: SWITCH NEEDLE (ERROR-PROOF STEPPED DESIGN) */}
       {/* ================================================================= */}
       {subTab === 'switchNeedle' && (
-        <form
-          onSubmit={handleSwitchNeedle}
-          className="bg-white rounded-2xl border border-slate-200/90 shadow-xs max-w-xl mx-auto overflow-hidden"
-        >
-          <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-sm font-bold">Switch Needle Action (Swap Size)</h3>
-          </div>
-          <div className="p-5 space-y-4">
-            <div className="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded text-xs font-bold text-indigo-900">
-              Old carried needle returns to stock (+1), and requested new needle is issued (-1).
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Operator EPF / Name
-                </label>
-                <select
-                  value={switchOperator}
-                  onChange={(e) => setSwitchOperator(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                >
-                  <option value="">-- Select Operator --</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
-                      EPF #{emp.epfNo} - {emp.fullName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Machine Number
-                </label>
-                <select
-                  value={switchMachine}
-                  onChange={(e) => setSwitchMachine(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                >
-                  <option value="">-- Select Machine --</option>
-                  {machineOptions.map((mc) => (
-                    <option key={mc} value={mc}>
-                      {mc}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Style Number</label>
-                {styleOptions.length > 0 ? (
-                  <select
-                    value={switchStyle}
-                    onChange={(e) => setSwitchStyle(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                  >
-                    <option value="">-- Select Style --</option>
-                    {styleOptions.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    maxLength={60}
-                    placeholder="Enter Style No."
-                    value={switchStyle}
-                    onChange={(e) => setSwitchStyle(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Seam Location</label>
-                <select
-                  value={switchSeam}
-                  onChange={(e) => setSwitchSeam(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                >
-                  <option value="">-- Select Seam Location --</option>
-                  {operationOptions.map((op) => (
-                    <option key={op} value={op}>
-                      {op}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <label className="block text-xs font-extrabold text-amber-900 mb-1">
-                Carried / Old Needle Returned (+1 Stock In)
-              </label>
-              <select
-                value={switchCarriedId}
-                onChange={(e) => setSwitchCarriedId(Number(e.target.value))}
-                className="w-full bg-white border border-amber-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+        <div className="max-w-3xl mx-auto">
+          {needleTypes.length === 0 ? (
+            <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center space-y-3">
+              <RefreshCw className="w-9 h-9 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-extrabold text-slate-800">
+                Register Needle Types Before Switching
+              </h3>
+              <p className="text-xs text-slate-500">
+                Stock Directory eke needle specs add karala inna one switch action ekak karanna.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSubTab('newNeedleType')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-persian-800 text-white text-xs font-bold cursor-pointer"
               >
-                <option value={0}>
-                  {needleTypes.length === 0 ? '-- Add Needle Type First --' : '-- Select Old Needle --'}
-                </option>
-                {needleTypes.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.system} - Size: {n.size} (Stock: {n.stock})
-                  </option>
-                ))}
-              </select>
+                <PlusCircle className="w-3.5 h-3.5" /> Add Needle Type
+              </button>
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Requested New Needle Type (-1 Stock Out)
-              </label>
-              <select
-                value={switchRequestedId}
-                onChange={(e) => setSwitchRequestedId(Number(e.target.value))}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800"
-              >
-                <option value={0}>
-                  {needleTypes.length === 0 ? '-- Add Needle Type First --' : '-- Select New Needle --'}
-                </option>
-                {needleTypes.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.system} - Size: {n.size} (Stock: {n.stock})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition cursor-pointer"
+          ) : (
+            <form
+              onSubmit={handleSwitchNeedle}
+              className="bg-white rounded-2xl border border-slate-200/90 shadow-soft overflow-hidden"
             >
-              Process Switch &amp; Record
-            </button>
-          </div>
-        </form>
+              <div className="bg-persian-800 text-white px-5 py-4 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-400/20 text-emerald-300 flex items-center justify-center">
+                    <RefreshCw className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold">Switch Needle (Size / Type Swap)</h3>
+                    <p className="text-[11px] text-blue-200">
+                      Returned old needle (+1 In) • Issued new needle (-1 Out) • Auto-logged to Record Sheet
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-5">
+                {/* Step 1: Operator & Job Context */}
+                <div className="space-y-3">
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-persian-800 text-white text-[10px] flex items-center justify-center">
+                      1
+                    </span>
+                    Operator, Machine &amp; Style Details
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Operator EPF / Name *
+                      </label>
+                      <select
+                        value={switchOperator}
+                        onChange={(e) => setSwitchOperator(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      >
+                        <option value="">-- Select Operator --</option>
+                        {employees.map((emp) => (
+                          <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
+                            EPF #{emp.epfNo} - {emp.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Machine Number *
+                      </label>
+                      <select
+                        value={switchMachine}
+                        onChange={(e) => setSwitchMachine(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      >
+                        <option value="">-- Select Machine --</option>
+                        {machineOptions.map((mc) => (
+                          <option key={mc} value={mc}>
+                            {mc}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Style Number *
+                      </label>
+                      {styleOptions.length > 0 ? (
+                        <select
+                          value={switchStyle}
+                          onChange={(e) => setSwitchStyle(e.target.value)}
+                          required
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                        >
+                          <option value="">-- Select Style --</option>
+                          {styleOptions.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          maxLength={60}
+                          required
+                          placeholder="Enter Style No."
+                          value={switchStyle}
+                          onChange={(e) => setSwitchStyle(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Seam Location *
+                      </label>
+                      <select
+                        value={switchSeam}
+                        onChange={(e) => setSwitchSeam(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      >
+                        <option value="">-- Select Seam Location --</option>
+                        {operationOptions.map((op) => (
+                          <option key={op} value={op}>
+                            {op}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 2: Needle Swap */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-persian-800 text-white text-[10px] flex items-center justify-center">
+                      2
+                    </span>
+                    Select Needles to Swap
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+                      <label className="block text-xs font-extrabold text-amber-900">
+                        Old Needle Returned (+1 Stock In) *
+                      </label>
+                      <select
+                        value={switchCarriedId}
+                        onChange={(e) => setSwitchCarriedId(Number(e.target.value))}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none"
+                      >
+                        <option value={0}>-- Select Returned Needle --</option>
+                        {needleTypes.map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.system} — Size {n.size} (Stock: {n.stock})
+                          </option>
+                        ))}
+                      </select>
+                      {selectedSwitchCarried && (
+                        <div className="text-[11px] font-mono font-bold text-amber-800">
+                          Stock: {selectedSwitchCarried.stock} →{' '}
+                          {selectedSwitchRequested?.id === selectedSwitchCarried.id
+                            ? `${selectedSwitchCarried.stock} (Same type)`
+                            : `${selectedSwitchCarried.stock + 1} Pcs (+1)`}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2">
+                      <label className="block text-xs font-extrabold text-emerald-900">
+                        New Needle Issued (-1 Stock Out) *
+                      </label>
+                      <select
+                        value={switchRequestedId}
+                        onChange={(e) => setSwitchRequestedId(Number(e.target.value))}
+                        className="w-full bg-white border border-emerald-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none"
+                      >
+                        <option value={0}>-- Select New Needle --</option>
+                        {needleTypes.map((n) => (
+                          <option key={n.id} value={n.id} disabled={n.stock <= 0}>
+                            {n.system} — Size {n.size} (
+                            {n.stock <= 0 ? 'OUT OF STOCK' : `Stock: ${n.stock}`})
+                          </option>
+                        ))}
+                      </select>
+                      {selectedSwitchRequested && (
+                        <div className="text-[11px] font-mono font-bold text-emerald-800">
+                          Stock: {selectedSwitchRequested.stock} →{' '}
+                          {selectedSwitchCarried?.id === selectedSwitchRequested.id
+                            ? `${selectedSwitchRequested.stock} (Same type)`
+                            : `${Math.max(0, selectedSwitchRequested.stock - 1)} Pcs (-1)`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedSwitchCarried &&
+                    selectedSwitchRequested &&
+                    selectedSwitchCarried.id === selectedSwitchRequested.id && (
+                      <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-3.5 py-2.5 text-xs font-bold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>
+                          Note: Returned needle ha Requested needle dekama ekama type ekai ({selectedSwitchCarried.system} {selectedSwitchCarried.size}) — stock wenas wenne na.
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Confirm Switch &amp; Log to Record Sheet</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
       {/* ================================================================= */}
       {/* TAB 5: RECORD BROKEN / BLUNT NEEDLE (TRACED ONLY) */}
       {/* ================================================================= */}
       {subTab === 'recordBroken' && (
-        <form
-          onSubmit={handleBrokenRecord}
-          className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-6 space-y-4"
-        >
-          <div className="border-b border-slate-100 pb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                Record Broken / Blunt Needle
+        <div className="max-w-4xl mx-auto">
+          {needleTypes.length === 0 ? (
+            <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center space-y-3">
+              <AlertTriangle className="w-9 h-9 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-extrabold text-slate-800">
+                Register Needle Types First
               </h3>
               <p className="text-xs text-slate-500">
-                All needle parts must be traced (Y). For missing parts, use the Missing Checklist (CLN) tab.
+                Broken / Blunt needle record karanna kalin Stock Directory eke needle spec ekak register karanna.
               </p>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {(['BROKEN', 'BLUNT'] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setBrokenActionType(t)}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                    brokenActionType === t
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Date</label>
-              <input
-                type="date"
-                max={todayStr}
-                value={brokenDate}
-                onChange={(e) => setBrokenDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Style No.</label>
-              {styleOptions.length > 0 ? (
-                <select
-                  value={brokenStyle}
-                  onChange={(e) => setBrokenStyle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                >
-                  <option value="">-- Select Style --</option>
-                  {styleOptions.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  maxLength={60}
-                  placeholder="Enter Style No."
-                  value={brokenStyle}
-                  onChange={(e) => setBrokenStyle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-                />
-              )}
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">EPF No / Name</label>
-              <select
-                value={brokenEpf}
-                onChange={(e) => setBrokenEpf(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              >
-                <option value="">-- Select Operator --</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
-                    EPF #{emp.epfNo} - {emp.fullName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">MC Number</label>
-              <select
-                value={brokenMc}
-                onChange={(e) => setBrokenMc(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              >
-                <option value="">-- Select Machine --</option>
-                {machineOptions.map((mc) => (
-                  <option key={mc} value={mc}>
-                    {mc}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 mb-1">Seam Location</label>
-              <select
-                value={brokenSeam}
-                onChange={(e) => setBrokenSeam(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              >
-                <option value="">-- Select Seam Location --</option>
-                {operationOptions.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Needle Spec</label>
-              <select
-                value={brokenNeedleId}
-                onChange={(e) => setBrokenNeedleId(Number(e.target.value))}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              >
-                <option value={0}>
-                  {needleTypes.length === 0 ? '-- Add Needle Type First --' : '-- Select Needle --'}
-                </option>
-                {needleTypes.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.system} - {n.size} (Stock: {n.stock})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Time</label>
-              <input
-                type="time"
-                value={brokenTime}
-                onChange={(e) => setBrokenTime(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold"
-              />
-            </div>
-            <div className="sm:col-span-2 lg:col-span-4 flex items-end justify-end pt-1">
               <button
-                type="submit"
-                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition cursor-pointer"
+                type="button"
+                onClick={() => setSubTab('newNeedleType')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-persian-800 text-white text-xs font-bold cursor-pointer"
               >
-                Save {brokenActionType} Record (Traced) &amp; Adjust Stock
+                <PlusCircle className="w-3.5 h-3.5" /> Add Needle Type
               </button>
             </div>
-          </div>
-        </form>
+          ) : (
+            <form
+              onSubmit={handleBrokenRecord}
+              className="bg-white rounded-2xl border border-slate-200/90 shadow-soft overflow-hidden"
+            >
+              <div className="bg-persian-800 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/25 text-amber-300 flex items-center justify-center">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold">
+                      Record Broken / Blunt Needle (All Parts Traced)
+                    </h3>
+                    <p className="text-[11px] text-blue-200">
+                      Needle piece ekak missing nam Missing Checklist (CLN) tab eka use karanna.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-persian-900/70 p-1 rounded-xl border border-persian-700">
+                  {(['BROKEN', 'BLUNT'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setBrokenActionType(t)}
+                      className={`px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${
+                        brokenActionType === t
+                          ? t === 'BROKEN'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'bg-amber-400 text-persian-950 shadow-xs'
+                          : 'text-blue-200 hover:text-white'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-5 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Date *</label>
+                    <input
+                      type="date"
+                      max={todayStr}
+                      value={brokenDate}
+                      onChange={(e) => setBrokenDate(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:border-persian-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Incident Time *
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="time"
+                        value={brokenTime}
+                        onChange={(e) => setBrokenTime(e.target.value)}
+                        required
+                        className="flex-1 bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:border-persian-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setBrokenTime(getCurrentTimeHHMM())}
+                        title="Set current time"
+                        className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        Now
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Operator EPF / Name *
+                    </label>
+                    <select
+                      value={brokenEpf}
+                      onChange={(e) => setBrokenEpf(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                    >
+                      <option value="">-- Select Operator --</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
+                          EPF #{emp.epfNo} - {emp.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Machine Number *
+                    </label>
+                    <select
+                      value={brokenMc}
+                      onChange={(e) => setBrokenMc(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                    >
+                      <option value="">-- Select Machine --</option>
+                      {machineOptions.map((mc) => (
+                        <option key={mc} value={mc}>
+                          {mc}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Style No. *
+                    </label>
+                    {styleOptions.length > 0 ? (
+                      <select
+                        value={brokenStyle}
+                        onChange={(e) => setBrokenStyle(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      >
+                        <option value="">-- Select Style --</option>
+                        {styleOptions.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        maxLength={60}
+                        required
+                        placeholder="Enter Style No."
+                        value={brokenStyle}
+                        onChange={(e) => setBrokenStyle(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Seam Location *
+                    </label>
+                    <select
+                      value={brokenSeam}
+                      onChange={(e) => setBrokenSeam(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                    >
+                      <option value="">-- Select Seam Location --</option>
+                      {operationOptions.map((op) => (
+                        <option key={op} value={op}>
+                          {op}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Replacement Needle Spec (-1 Pc from Stock) *
+                    </label>
+                    <select
+                      value={brokenNeedleId}
+                      onChange={(e) => setBrokenNeedleId(Number(e.target.value))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none focus:border-persian-500"
+                    >
+                      <option value={0}>-- Select Needle Spec --</option>
+                      {needleTypes.map((n) => (
+                        <option key={n.id} value={n.id} disabled={n.stock <= 0}>
+                          {n.system} — Size {n.size} (
+                          {n.stock <= 0 ? 'OUT OF STOCK' : `Stock: ${n.stock} Pcs`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Live Stock Impact Preview */}
+                {selectedBrokenNeedle && (
+                  <div
+                    className={`rounded-xl border p-3.5 flex flex-wrap items-center justify-between gap-2 text-xs font-bold ${
+                      selectedBrokenNeedle.stock - 1 <= getLowStockThreshold(selectedBrokenNeedle)
+                        ? 'bg-amber-50 border-amber-300 text-amber-900'
+                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span>
+                      Stock Impact for {selectedBrokenNeedle.system} ({selectedBrokenNeedle.size}):{' '}
+                      <strong className="font-mono">
+                        {selectedBrokenNeedle.stock} → {Math.max(0, selectedBrokenNeedle.stock - 1)}{' '}
+                        Pcs
+                      </strong>
+                    </span>
+                    <span className="font-mono text-[11px]">
+                      Low Stock Alert: ≤ {getLowStockThreshold(selectedBrokenNeedle)} Pcs
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end pt-1">
+                  <button
+                    type="submit"
+                    className="px-6 py-3 rounded-xl bg-persian-800 hover:bg-persian-600 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
+                  >
+                    Save {brokenActionType} Record (Traced) &amp; Deduct 1 Pc
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
       {/* ================================================================= */}
-      {/* TAB 6: NEW NEEDLE TYPE & BULK RESTOCK */}
+      {/* TAB 6: REGISTER NEW NEEDLE TYPE (DEDICATED TAB + LOW STOCK QTY) */}
       {/* ================================================================= */}
-      {subTab === 'stockManage' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* Bulk Restock */}
-          <form
-            onSubmit={handleRestock}
-            className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden"
-          >
-            <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center gap-2">
-              <PackagePlus className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-bold">Bulk Restock Needle Inventory</h3>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Select Needle Type
-                </label>
-                <select
-                  value={restockNeedleId}
-                  onChange={(e) => setRestockNeedleId(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800"
-                >
-                  <option value={0}>
-                    {needleTypes.length === 0 ? '-- Add Needle Type First --' : '-- Select Needle Type --'}
-                  </option>
-                  {needleTypes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.system} - Size: {n.size} (Current: {n.stock} Pcs)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Quantity to Add (Pcs)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  value={restockQty}
-                  onChange={(e) => setRestockQty(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-black text-emerald-700"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition cursor-pointer"
-              >
-                Add to Inventory Stock
-              </button>
-            </div>
-          </form>
-
-          {/* Register New Needle Specification */}
+      {subTab === 'newNeedleType' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Left: Clean Guided Registration Form */}
           <form
             onSubmit={handleSaveNewType}
-            className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden"
+            className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/90 shadow-soft overflow-hidden"
           >
-            <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center gap-2">
-              <PlusCircle className="w-4 h-4 text-amber-400" />
-              <h3 className="text-sm font-bold">Register New Needle Specification</h3>
+            <div className="bg-persian-800 text-white px-5 py-4 flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center">
+                <PlusCircle className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold">Register New Needle Type</h3>
+                <p className="text-[11px] text-blue-200">
+                  Preset buttons click karala ho type karala accurate widihata add karanna
+                </p>
+              </div>
             </div>
-            <div className="p-5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+
+            <div className="p-5 space-y-5">
+              {/* System & Size with Quick Presets */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-extrabold text-slate-700">
                     Needle System *
                   </label>
                   <input
                     type="text"
+                    required
+                    maxLength={30}
                     placeholder="e.g. DB X K5"
                     value={newSystem}
                     onChange={(e) => setNewSystem(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-persian-500"
                   />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {SYSTEM_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewSystem(preset)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                          newSystem === preset
+                            ? 'bg-persian-800 text-white border-persian-900'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Size / Nm *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 75/11"
-                    value={newSize}
-                    onChange={(e) => setNewSize(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Ref Code</label>
-                  <input
-                    type="text"
-                    placeholder="785965"
-                    value={newRef}
-                    onChange={(e) => setNewRef(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Point Variant
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-extrabold text-slate-700">
+                    Size / Nm *
                   </label>
                   <input
                     type="text"
-                    placeholder="FFG/SES"
-                    value={newPoint}
-                    onChange={(e) => setNewPoint(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold"
+                    required
+                    maxLength={20}
+                    placeholder="e.g. 75/11"
+                    value={newSize}
+                    onChange={(e) => setNewSize(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-persian-500"
+                  />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {SIZE_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewSize(preset)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                          newSize === preset
+                            ? 'bg-persian-800 text-white border-persian-900'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Instant Duplicate Warning */}
+              {duplicateNewSpec && (
+                <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-900">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>
+                      &ldquo;{duplicateNewSpec.system} ({duplicateNewSpec.size})&rdquo; danatamath register karala thiyenne (Stock: {duplicateNewSpec.stock} Pcs).
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => jumpToRestockNeedle(duplicateNewSpec)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Go to Restock</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Ref Code & Point Variant */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                    Ref / Box Code (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    placeholder="e.g. 785965"
+                    value={newRef}
+                    onChange={(e) => setNewRef(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:border-persian-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Initial Stock
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-extrabold text-slate-700">
+                    Point Variant (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    placeholder="e.g. FFG/SES"
+                    value={newPoint}
+                    onChange={(e) => setNewPoint(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-persian-500"
+                  />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {POINT_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewPoint(preset)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                          newPoint === preset
+                            ? 'bg-persian-800 text-white border-persian-900'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Initial Stock & Custom Low Stock Alert Qty */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-3.5 space-y-1.5">
+                  <label className="block text-xs font-extrabold text-emerald-900">
+                    Opening / Initial Stock (Pcs) *
                   </label>
                   <input
                     type="number"
                     min={0}
+                    max={MAX_STOCK_LIMIT}
                     value={newStock}
+                    onFocus={(e) => e.currentTarget.select()}
                     onChange={(e) => setNewStock(Math.max(0, Number(e.target.value) || 0))}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold text-emerald-700"
+                    className="w-full bg-white border border-emerald-300 rounded-xl p-2.5 text-sm font-mono font-black text-emerald-800 outline-none focus:border-emerald-600"
                   />
+                  <p className="text-[10px] font-semibold text-emerald-700">
+                    Dan store eke thiyana needle pcs gana enter karanna.
+                  </p>
+                </div>
+
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-1.5">
+                  <label className="block text-xs font-extrabold text-amber-950">
+                    Low Stock Alert Qty (Pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={MAX_STOCK_LIMIT}
+                    value={newLowStockQty}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setNewLowStockQty(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-sm font-mono font-black text-amber-900 outline-none focus:border-amber-600"
+                  />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {LOW_STOCK_QUICK_QTYS.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => setNewLowStockQty(q)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border transition cursor-pointer ${
+                          newLowStockQty === q
+                            ? 'bg-amber-600 text-white border-amber-700'
+                            : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-100'
+                        }`}
+                      >
+                        ≤{q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
+
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition cursor-pointer"
+                disabled={Boolean(duplicateNewSpec) || !newSystem.trim() || !newSize.trim()}
+                className="w-full py-3 rounded-xl bg-persian-800 hover:bg-persian-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold text-xs shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
               >
-                Save Needle Type
+                <PlusCircle className="w-4 h-4" />
+                <span>Save New Needle Specification</span>
               </button>
             </div>
           </form>
+
+          {/* Right: Live Card Preview & Existing Specs Reference */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 space-y-3">
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                Live Stock Card Preview
+              </h4>
+              <div
+                className={`p-4 rounded-2xl border ${
+                  newStock <= 0
+                    ? 'border-rose-300 bg-rose-50/30'
+                    : newStock <= newLowStockQty
+                      ? 'border-amber-300 bg-amber-50/30'
+                      : 'border-emerald-200 bg-emerald-50/20'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="bg-persian-800 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-md uppercase">
+                    {newSystem.trim() || 'SYSTEM CODE'}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                      newStock <= 0
+                        ? 'bg-rose-600 text-white'
+                        : newStock <= newLowStockQty
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                    }`}
+                  >
+                    {newStock <= 0
+                      ? 'Out of Stock'
+                      : newStock <= newLowStockQty
+                        ? 'Low Stock Alert'
+                        : 'Optimal Stock'}
+                  </span>
+                </div>
+                <div className="text-base font-black text-slate-900">
+                  Size {newSize.trim() || '75/11'}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500 flex items-center justify-between mt-0.5">
+                  <span>Point: {newPoint.trim() || '-'}</span>
+                  <span className="font-mono text-[10px]">Ref: {newRef.trim() || '-'}</span>
+                </div>
+                <div className="mt-3 pt-2.5 border-t border-slate-200/70 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 font-mono">
+                    Alert ≤ {newLowStockQty.toLocaleString()} Pcs
+                  </span>
+                  <span className="text-lg font-mono font-black text-slate-900">
+                    {newStock.toLocaleString()} <span className="text-xs font-sans text-slate-500">Pcs</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                  Already Registered ({needleTypes.length})
+                </h4>
+                <span className="text-[10px] font-semibold text-slate-400">Avoid Duplicates</span>
+              </div>
+              {needleTypes.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No specs registered yet.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  {needleTypes.map((n) => (
+                    <div
+                      key={n.id}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/70 text-xs"
+                    >
+                      <div className="font-bold text-slate-800 truncate">
+                        {n.system} — <span className="text-persian-800">{n.size}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 font-mono text-[11px]">
+                        <span className="font-bold text-slate-700">{n.stock} Pcs</span>
+                        <span className="text-slate-400">(≤{getLowStockThreshold(n)})</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* TAB 7: RESTOCK NEEDLE INVENTORY (DEDICATED TAB) */}
+      {/* ================================================================= */}
+      {subTab === 'restockNeedle' && (
+        <div className="space-y-5">
+          {needleTypes.length === 0 ? (
+            <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center space-y-3">
+              <PackagePlus className="w-9 h-9 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-extrabold text-slate-800">
+                No Needle Types to Restock
+              </h3>
+              <p className="text-xs text-slate-500">
+                Restock karanna kalin New Needle Type tab eken needle specification ekak add karanna.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSubTab('newNeedleType')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-persian-800 text-white text-xs font-bold cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" /> Register New Needle Type
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Left: Restock Form */}
+              <form
+                onSubmit={handleRestock}
+                className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/90 shadow-soft overflow-hidden"
+              >
+                <div className="bg-emerald-700 text-white px-5 py-4 flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-white/15 text-emerald-100 flex items-center justify-center">
+                    <PackagePlus className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold">Restock Needle Inventory</h3>
+                    <p className="text-[11px] text-emerald-100">
+                      Needle spec eka thorala aluthin ena stock gana add karanna — before/after live preview ekka
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 space-y-5">
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                      1. Select Needle Type to Restock *
+                    </label>
+                    <select
+                      value={restockNeedleId}
+                      onChange={(e) => {
+                        const nextId = Number(e.target.value);
+                        setRestockNeedleId(nextId);
+                        const found = needleTypes.find((n) => n.id === nextId);
+                        setRestockCustomLowQty(found ? String(getLowStockThreshold(found)) : '');
+                      }}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs font-bold text-slate-900 outline-none focus:border-emerald-600"
+                    >
+                      <option value={0}>-- Select Needle Type --</option>
+                      {needleTypes.map((n) => {
+                        const th = getLowStockThreshold(n);
+                        const isLow = n.stock <= th;
+                        return (
+                          <option key={n.id} value={n.id}>
+                            {isLow ? '⚠️ [LOW] ' : ''}
+                            {n.system} — Size {n.size} (Current: {n.stock} Pcs • Alert ≤ {th})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-extrabold text-slate-700">
+                      2. Quantity to Add (Pcs) *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={MAX_RESTOCK_QTY}
+                      value={restockQty}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setRestockQty(Math.max(0, Number(e.target.value) || 0))}
+                      placeholder="Enter quantity to add"
+                      className="w-full bg-emerald-50/60 border-2 border-emerald-300 rounded-xl p-3 text-base font-mono font-black text-emerald-900 outline-none focus:border-emerald-600"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 mr-1">Quick Add:</span>
+                      {RESTOCK_QUICK_QTYS.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setRestockQty((prev) => prev + q)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-800 border border-emerald-200 text-[11px] font-mono font-extrabold transition cursor-pointer"
+                        >
+                          +{q}
+                        </button>
+                      ))}
+                      {restockQty > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setRestockQty(0)}
+                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Optional: Update Low Stock Alert Qty during Restock */}
+                  {selectedRestockNeedle && (
+                    <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-extrabold text-amber-950">
+                          Low Stock Alert Qty (Optional Update)
+                        </label>
+                        <span className="text-[10px] font-mono font-bold text-amber-800">
+                          Current: ≤ {getLowStockThreshold(selectedRestockNeedle)} Pcs
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={MAX_STOCK_LIMIT}
+                        value={restockCustomLowQty}
+                        onChange={(e) => setRestockCustomLowQty(e.target.value)}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2 text-xs font-mono font-bold text-amber-900 outline-none focus:border-amber-600"
+                      />
+                    </div>
+                  )}
+
+                  {/* Live Before -> After Stock Confirmation Box */}
+                  {selectedRestockNeedle && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2.5">
+                        Live Stock Update Preview — {selectedRestockNeedle.system} ({selectedRestockNeedle.size})
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center items-center">
+                        <div className="bg-white rounded-xl border border-slate-200 p-2.5">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                            Current
+                          </span>
+                          <span className="font-mono font-black text-base text-slate-800">
+                            {selectedRestockNeedle.stock.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-2.5">
+                          <span className="text-[10px] font-bold text-emerald-700 block uppercase">
+                            Adding
+                          </span>
+                          <span className="font-mono font-black text-base text-emerald-700">
+                            +{restockQty.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-persian-800 text-white rounded-xl p-2.5">
+                          <span className="text-[10px] font-bold text-blue-200 block uppercase">
+                            New Total
+                          </span>
+                          <span className="font-mono font-black text-base text-amber-300">
+                            {(selectedRestockNeedle.stock + restockQty).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={!selectedRestockNeedle || restockQty <= 0}
+                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold text-xs shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <PackagePlus className="w-4 h-4" />
+                    <span>
+                      {selectedRestockNeedle && restockQty > 0
+                        ? `Confirm Restock (+${restockQty.toLocaleString()} Pcs)`
+                        : 'Select Needle & Enter Qty to Restock'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Right: Low Stock Priority Queue (1-Click Select) */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-rose-700 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                      Low Stock Priority Queue ({lowStockItems.length})
+                    </h4>
+                    <span className="text-[10px] font-semibold text-slate-400">
+                      Click to select
+                    </span>
+                  </div>
+
+                  {lowStockItems.length === 0 ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center space-y-1">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto" />
+                      <div className="text-xs font-extrabold text-emerald-900">
+                        All Needle Stocks Are Healthy!
+                      </div>
+                      <p className="text-[11px] text-emerald-700">
+                        Every registered needle type is above its Low Stock Alert Qty.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {lowStockItems.map((n) => {
+                        const th = getLowStockThreshold(n);
+                        const isSelected = restockNeedleId === n.id;
+                        return (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => {
+                              setRestockNeedleId(n.id);
+                              setRestockCustomLowQty(String(th));
+                              if (restockQty === 0) {
+                                setRestockQty(Math.max(100, th * 2 - n.stock));
+                              }
+                            }}
+                            className={`w-full text-left p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${
+                              isSelected
+                                ? 'bg-emerald-50 border-2 border-emerald-500 shadow-xs'
+                                : 'bg-rose-50/50 border-rose-200 hover:bg-rose-50'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-extrabold text-slate-900 truncate">
+                                {n.system} — Size {n.size}
+                              </div>
+                              <div className="text-[10px] font-mono font-bold text-rose-700">
+                                Stock: {n.stock} Pcs (Alert ≤ {th})
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold shrink-0 ${
+                                isSelected
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-rose-600 text-white'
+                              }`}
+                            >
+                              {isSelected ? 'Selected ✓' : 'Restock →'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* SUPER ADMIN ONLY MODAL: DIRECT EDIT NEEDLE STOCK QTY */}
+      {/* ================================================================= */}
+      {isSuperAdmin && (
+        <dialog
+          ref={stockEditDialogRef}
+          onCancel={(e) => {
+            e.preventDefault();
+            closeSuperAdminStockEdit();
+          }}
+          className="m-auto rounded-2xl border-2 border-amber-300 shadow-2xl w-full max-w-md p-0 overflow-hidden bg-white text-slate-900"
+        >
+          {editingStockNeedle && (
+            <form onSubmit={handleConfirmSuperAdminStockEdit}>
+              <div className="bg-persian-800 text-white p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-extrabold text-sm">
+                      Super Admin — Edit Current Needle Qty
+                    </h2>
+                    <p className="text-[11px] text-blue-200">
+                      {editingStockNeedle.system} — Size {editingStockNeedle.size} (Ref:{' '}
+                      {editingStockNeedle.ref})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeSuperAdminStockEdit}
+                  aria-label="Close modal"
+                  className="w-7 h-7 rounded-lg bg-persian-900/60 text-blue-200 hover:text-white flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-center">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                      Current Stock Qty
+                    </span>
+                    <span className="font-mono font-black text-lg text-slate-800">
+                      {editingStockNeedle.stock.toLocaleString()} Pcs
+                    </span>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <span className="text-[10px] font-bold uppercase text-amber-700 block">
+                      Difference
+                    </span>
+                    {(() => {
+                      const nextNum = Math.floor(Number(editStockQtyInput) || 0);
+                      const diff = nextNum - editingStockNeedle.stock;
+                      return (
+                        <span
+                          className={`font-mono font-black text-lg ${
+                            diff > 0
+                              ? 'text-emerald-700'
+                              : diff < 0
+                                ? 'text-rose-700'
+                                : 'text-slate-500'
+                          }`}
+                        >
+                          {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()} Pcs
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                    New Corrected Stock Qty (Pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={MAX_STOCK_LIMIT * 2}
+                    autoFocus
+                    required
+                    value={editStockQtyInput}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setEditStockQtyInput(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-persian-400 rounded-xl p-2.5 text-base font-mono font-black text-persian-900 outline-none focus:border-persian-700"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-extrabold text-slate-700">
+                    Reason for Manual Qty Override *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    placeholder="e.g. Physical count audit mismatch"
+                    value={editStockReasonInput}
+                    onChange={(e) => setEditStockReasonInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                  />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {ADJUSTMENT_REASON_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setEditStockReasonInput(preset)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                          editStockReasonInput === preset
+                            ? 'bg-persian-800 text-white border-persian-900'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={closeSuperAdminStockEdit}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs shadow-sm transition cursor-pointer"
+                  >
+                    Confirm Qty Override
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+        </dialog>
       )}
     </div>
   );

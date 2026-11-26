@@ -40,11 +40,20 @@ export interface ErpApprovalRequestEntity {
   customerName?: string;
 }
 
+const INTERNAL_USERNAME_DOMAIN = 'users.dinushaemb.com';
+const USERNAME_REGEX = /^[a-z0-9][a-z0-9._-]{2,31}$/;
+
+function normalizeUsername(raw: string | undefined | null): string {
+  return (raw || '').trim().toLowerCase().replace(/^@+/, '');
+}
+
 export interface ErpUserAccountEntity {
   id: string;
   authUserId: string;
   fullName: string;
+  username: string;
   email: string;
+  hasRealEmail: boolean;
   role: UserRole;
   allowedModules: ErpModuleId[];
   isActive: boolean;
@@ -64,13 +73,25 @@ export interface ErpAuditLogEntity {
   createdAt: string;
 }
 
-function mapUserProfile(row: Record<string, unknown>): ErpUserAccountEntity {
+function mapUserProfile(
+  row: Record<string, unknown>,
+  authUsernameMap?: Map<string, string>
+): ErpUserAccountEntity {
   const role = (row.role as UserRole) || 'PRODUCTION_MANAGER';
+  const authUserId = String(row.auth_user_id);
+  const email = String(row.email || '').trim().toLowerCase();
+  const hasRealEmail = Boolean(email) && !email.endsWith(`@${INTERNAL_USERNAME_DOMAIN}`);
+  const metaUsername = authUsernameMap?.get(authUserId);
+  const fallbackUsername = email ? email.split('@')[0] : '';
+  const username = normalizeUsername(metaUsername || fallbackUsername);
+
   return {
     id: String(row.id),
-    authUserId: String(row.auth_user_id),
+    authUserId,
     fullName: String(row.full_name || ''),
-    email: String(row.email || ''),
+    username,
+    email,
+    hasRealEmail,
     role,
     allowedModules: resolveAllowedModules(
       role,
@@ -153,8 +174,9 @@ export async function fetchAdminUsersAndLogsAction(): Promise<{
     return { success: false, error: 'Admin access required.' };
   }
 
-  const [usersRes, logsRes, reqRes] = await Promise.all([
+  const [usersRes, authListRes, logsRes, reqRes] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('*').order('created_at', { ascending: false }),
+    supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
     supabaseAdmin
       .from('erp_audit_logs')
       .select('*')
@@ -177,9 +199,15 @@ export async function fetchAdminUsersAndLogsAction(): Promise<{
     };
   }
 
+  const authUsernameMap = new Map<string, string>();
+  for (const au of authListRes.data?.users || []) {
+    const metaU = normalizeUsername(String(au.user_metadata?.username || ''));
+    if (metaU) authUsernameMap.set(au.id, metaU);
+  }
+
   return {
     success: true,
-    users: (usersRes.data || []).map((r) => mapUserProfile(r)),
+    users: (usersRes.data || []).map((r) => mapUserProfile(r, authUsernameMap)),
     logs: (logsRes.data || []).map((r) => mapAuditLog(r)),
     requests: (reqRes.data || []).map((r) => mapApprovalRequest(r)),
   };
@@ -211,9 +239,35 @@ export async function fetchAuditLogsAction(): Promise<{
   };
 }
 
+async function isUsernameTaken(username: string, excludeAuthUserId?: string): Promise<boolean> {
+  const norm = normalizeUsername(username);
+  if (!norm) return false;
+  const internalEmail = `${norm}@${INTERNAL_USERNAME_DOMAIN}`;
+
+  const [authListRes, profRes] = await Promise.all([
+    supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
+    supabaseAdmin.from('user_profiles').select('auth_user_id, email'),
+  ]);
+
+  for (const u of authListRes.data?.users || []) {
+    if (excludeAuthUserId && u.id === excludeAuthUserId) continue;
+    const metaU = normalizeUsername(String(u.user_metadata?.username || ''));
+    if (metaU === norm) return true;
+    if ((u.email || '').toLowerCase() === internalEmail) return true;
+  }
+
+  for (const p of profRes.data || []) {
+    if (excludeAuthUserId && String(p.auth_user_id) === excludeAuthUserId) continue;
+    if (String(p.email || '').toLowerCase() === internalEmail) return true;
+  }
+
+  return false;
+}
+
 export async function createErpUserAction(input: {
   fullName: string;
-  email: string;
+  username: string;
+  email?: string;
   role: UserRole;
   password: string;
   allowedModules: ErpModuleId[];
@@ -224,21 +278,41 @@ export async function createErpUserAction(input: {
   }
 
   const fullName = (input.fullName || '').trim();
-  const email = (input.email || '').trim().toLowerCase();
+  const username = normalizeUsername(input.username);
+  const rawEmail = (input.email || '').trim().toLowerCase();
   const password = input.password || '';
 
-  if (fullName.length < 2 || !email.includes('@')) {
-    return { success: false, error: 'Please provide a valid full name and email address.' };
+  if (fullName.length < 2) {
+    return { success: false, error: 'Please provide a valid full name (at least 2 characters).' };
+  }
+  if (!USERNAME_REGEX.test(username)) {
+    return {
+      success: false,
+      error:
+        'Username must be 3–32 characters (lowercase letters, numbers, dots, underscores, or hyphens).',
+    };
+  }
+  if (rawEmail && !rawEmail.includes('@')) {
+    return { success: false, error: 'Please enter a valid work email or leave it blank.' };
   }
   if (password.length < 6) {
     return { success: false, error: 'Initial password must be at least 6 characters.' };
   }
 
+  if (await isUsernameTaken(username)) {
+    return {
+      success: false,
+      error: `Username "@${username}" is already taken. Please choose another username.`,
+    };
+  }
+
+  const finalEmail = rawEmail || `${username}@${INTERNAL_USERNAME_DOMAIN}`;
+
   const { data: createdAuth, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
+    email: finalEmail,
     password,
     email_confirm: true,
-    user_metadata: { full_name: fullName },
+    user_metadata: { full_name: fullName, username },
   });
 
   if (authErr || !createdAuth.user) {
@@ -255,7 +329,7 @@ export async function createErpUserAction(input: {
     .insert({
       auth_user_id: createdAuth.user.id,
       full_name: fullName,
-      email,
+      email: finalEmail,
       role: input.role,
       allowed_modules: resolvedModules,
       is_active: true,
@@ -274,16 +348,20 @@ export async function createErpUserAction(input: {
   await recordAuditLog({
     module: 'User Access',
     action: 'CREATE',
-    summary: `Created user ${fullName} (${email}) with role ${input.role} and ${resolvedModules.length} accessible module(s).`,
+    summary: `Created user ${fullName} (@${username}) with role ${input.role} and ${resolvedModules.length} accessible module(s).`,
   });
 
   revalidatePath('/erp');
-  return { success: true, user: mapUserProfile(profile) };
+  const uMap = new Map<string, string>([[createdAuth.user.id, username]]);
+  return { success: true, user: mapUserProfile(profile, uMap) };
 }
 
 export async function updateErpUserAction(input: {
   id: string;
+  authUserId?: string;
   fullName: string;
+  username?: string;
+  email?: string;
   role: UserRole;
   isActive: boolean;
   allowedModules: ErpModuleId[];
@@ -293,12 +371,88 @@ export async function updateErpUserAction(input: {
     return { success: false, error: 'Super Admin access required.' };
   }
 
+  const { data: existingProf, error: fetchErr } = await supabaseAdmin
+    .from('user_profiles')
+    .select('*')
+    .eq('id', input.id)
+    .single();
+
+  if (fetchErr || !existingProf) {
+    return { success: false, error: 'User profile not found.' };
+  }
+
+  const authUserId = input.authUserId || String(existingProf.auth_user_id);
+  const fullNameTrim = input.fullName.trim();
+  if (fullNameTrim.length < 2) {
+    return { success: false, error: 'Full Name must be at least 2 characters.' };
+  }
+
+  const nextUsername = input.username ? normalizeUsername(input.username) : '';
+  if (nextUsername && !USERNAME_REGEX.test(nextUsername)) {
+    return {
+      success: false,
+      error:
+        'Username must be 3–32 characters (lowercase letters, numbers, dots, underscores, or hyphens).',
+    };
+  }
+
+  if (nextUsername && (await isUsernameTaken(nextUsername, authUserId))) {
+    return {
+      success: false,
+      error: `Username "@${nextUsername}" is already used by another account.`,
+    };
+  }
+
+  const currentEmail = String(existingProf.email || '').trim().toLowerCase();
+  const isCurrentlyInternal = currentEmail.endsWith(`@${INTERNAL_USERNAME_DOMAIN}`);
+  const rawNextEmail = typeof input.email === 'string' ? input.email.trim().toLowerCase() : undefined;
+
+  let nextEmail = currentEmail;
+  if (rawNextEmail !== undefined) {
+    if (rawNextEmail === '') {
+      nextEmail = nextUsername
+        ? `${nextUsername}@${INTERNAL_USERNAME_DOMAIN}`
+        : currentEmail;
+    } else if (!rawNextEmail.includes('@')) {
+      return { success: false, error: 'Please enter a valid work email or leave it blank.' };
+    } else {
+      nextEmail = rawNextEmail;
+    }
+  } else if (isCurrentlyInternal && nextUsername) {
+    nextEmail = `${nextUsername}@${INTERNAL_USERNAME_DOMAIN}`;
+  }
+
+  // Sync Supabase Auth metadata & email if changed
+  const authUpdatePayload: {
+    email?: string;
+    email_confirm?: boolean;
+    user_metadata: { full_name: string; username?: string };
+  } = {
+    user_metadata: {
+      full_name: fullNameTrim,
+      ...(nextUsername ? { username: nextUsername } : {}),
+    },
+  };
+  if (nextEmail && nextEmail !== currentEmail) {
+    authUpdatePayload.email = nextEmail;
+    authUpdatePayload.email_confirm = true;
+  }
+
+  const { error: authUpdErr } = await supabaseAdmin.auth.admin.updateUserById(
+    authUserId,
+    authUpdatePayload
+  );
+  if (authUpdErr) {
+    return { success: false, error: authUpdErr.message || 'Failed to update auth credentials.' };
+  }
+
   const resolvedModules = resolveAllowedModules(input.role, input.allowedModules);
 
   const { data: profile, error } = await supabaseAdmin
     .from('user_profiles')
     .update({
-      full_name: input.fullName.trim(),
+      full_name: fullNameTrim,
+      email: nextEmail,
       role: input.role,
       is_active: input.isActive,
       allowed_modules: resolvedModules,
@@ -318,11 +472,49 @@ export async function updateErpUserAction(input: {
   await recordAuditLog({
     module: 'User Access',
     action: 'UPDATE',
-    summary: `Updated ${profile.full_name} (${profile.email}): role=${input.role}, active=${input.isActive}, modules=[${resolvedModules.join(', ')}].`,
+    summary: `Updated ${profile.full_name} (@${nextUsername || nextEmail.split('@')[0]}): role=${input.role}, active=${input.isActive}, modules=[${resolvedModules.join(', ')}].`,
   });
 
   revalidatePath('/erp');
-  return { success: true, user: mapUserProfile(profile) };
+  const uMap = nextUsername ? new Map<string, string>([[authUserId, nextUsername]]) : undefined;
+  return { success: true, user: mapUserProfile(profile, uMap) };
+}
+
+export async function toggleErpUserActiveAction(input: {
+  id: string;
+  authUserId: string;
+  isActive: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) {
+    return { success: false, error: 'Super Admin access required.' };
+  }
+  if (!input.isActive && guard.session.userId === input.authUserId) {
+    return { success: false, error: 'You cannot disable your own active Super Admin account.' };
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('user_profiles')
+    .update({
+      is_active: input.isActive,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.id)
+    .select('full_name, email')
+    .single();
+
+  if (error) {
+    return { success: false, error: formatSupabaseError(error) };
+  }
+
+  await recordAuditLog({
+    module: 'User Access',
+    action: input.isActive ? 'ENABLE' : 'DISABLE',
+    summary: `${input.isActive ? 'Enabled' : 'Disabled'} user account ${profile?.full_name || ''} (${profile?.email || ''}).`,
+  });
+
+  revalidatePath('/erp');
+  return { success: true };
 }
 
 export async function adminResetUserPasswordAction(input: {

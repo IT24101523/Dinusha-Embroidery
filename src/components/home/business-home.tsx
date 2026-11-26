@@ -40,6 +40,9 @@ import {
   Play,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  EyeOff,
+  User,
 } from 'lucide-react';
 
 const HERO_SLIDES = [
@@ -165,6 +168,7 @@ export function BusinessHome({
   const [authView, setAuthView] = useState<'login' | 'forgot' | 'otp'>('login');
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [otpInput, setOtpInput] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [forgotOtpSent, setForgotOtpSent] = useState(false);
@@ -303,14 +307,15 @@ export function BusinessHome({
       return;
     }
 
-    // Standard Email + Password login
+    // Standard Username / Email + Password login
     const res = await loginToErpAction({
+      identifier: emailInput,
       email: emailInput,
       password: passwordInput,
     });
     setAuthLoading(false);
     if (!res.success) {
-      setAuthError(res.error || 'Invalid email or password.');
+      setAuthError(res.error || 'Invalid username or password.');
       return;
     }
 
@@ -1380,18 +1385,22 @@ export function BusinessHome({
                   htmlFor={`${uid}-erp-email`}
                   className="block text-xs font-bold text-slate-700 mb-1"
                 >
-                  Work Email *
+                  Username or Email *
                 </label>
-                <input
-                  id={`${uid}-erp-email`}
-                  type="email"
-                  autoFocus
-                  required
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="manager@dinushaemb.com"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-persian-500"
-                />
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id={`${uid}-erp-email`}
+                    type="text"
+                    autoComplete="username"
+                    autoFocus
+                    required
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="e.g. admin or manager@dinushaemb.com"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-persian-500"
+                  />
+                </div>
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -1413,15 +1422,26 @@ export function BusinessHome({
                     Forgot password?
                   </button>
                 </div>
-                <input
-                  id={`${uid}-erp-password`}
-                  type="password"
-                  required
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-persian-500"
-                />
+                <div className="relative">
+                  <input
+                    id={`${uid}-erp-password`}
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-persian-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               <div className="text-right">
                 <button

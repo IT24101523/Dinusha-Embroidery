@@ -63,6 +63,8 @@ import {
   Boxes,
   Layers,
   Truck,
+  PlusCircle,
+  PackagePlus,
 } from 'lucide-react';
 
 export interface PayrollManagerSessionInfo {
@@ -426,13 +428,23 @@ export function PayrollManager({
                     },
                   },
                   {
-                    id: 'needle-stockManage',
-                    label: 'Manage Needle Stock',
-                    icon: Building2,
-                    isSelected: activeTab === 'needle' && needleSubTab === 'stockManage',
+                    id: 'needle-newNeedleType',
+                    label: 'New Needle Type',
+                    icon: PlusCircle,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'newNeedleType',
                     onSelect: () => {
                       setActiveTab('needle');
-                      setNeedleSubTab('stockManage');
+                      setNeedleSubTab('newNeedleType');
+                    },
+                  },
+                  {
+                    id: 'needle-restockNeedle',
+                    label: 'Restock Needles',
+                    icon: PackagePlus,
+                    isSelected: activeTab === 'needle' && needleSubTab === 'restockNeedle',
+                    onSelect: () => {
+                      setActiveTab('needle');
+                      setNeedleSubTab('restockNeedle');
                     },
                   },
                 ],
@@ -1154,6 +1166,8 @@ export function PayrollManager({
                 machines={productionBundle.machines}
                 styles={productionBundle.styles}
                 externalSubTab={needleSubTab}
+                userRole={sessionInfo?.role || null}
+                userLabel={sessionInfo?.userLabel || sessionInfo?.email || null}
               />
             </div>
           )}
