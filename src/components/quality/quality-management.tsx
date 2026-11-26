@@ -12,10 +12,8 @@ import {
   QualityCheckerStationEntity,
   QualityBlockEntity,
   QualityDeliveryTargetEntity,
-  CheckerOperationalStatus,
   assignCheckerEmployeeAction,
   saveCheckerStationAction,
-  deleteCheckerStationAction,
   saveQualityBlockAction,
   deleteQualityBlockAction,
   saveQualityDeliveryTargetAction,
@@ -35,6 +33,7 @@ import {
   Moon,
   Eye,
   AlertCircle,
+  AlertTriangle,
   X,
   UserCheck,
   Search,
@@ -47,6 +46,7 @@ import {
   Maximize2,
   Minimize2,
   Truck,
+  Printer,
 } from 'lucide-react';
 
 interface QualityManagementProps {
@@ -57,7 +57,35 @@ interface QualityManagementProps {
   externalSubTab?: QualitySubTab;
 }
 
-export type QualitySubTab = 'checkingEditor' | 'floorDisplay' | 'doneStyles' | 'checkerCrud';
+export type QualitySubTab =
+  | 'checkingEditor'
+  | 'deliveryPlan'
+  | 'floorDisplay'
+  | 'doneStyles'
+  | 'checkerCrud';
+
+function addDaysIso(isoDate: string, deltaDays: number): string {
+  const [yStr, mStr, dStr] = isoDate.split('-');
+  const y = parseInt(yStr, 10) || new Date().getFullYear();
+  const m = parseInt(mStr, 10) || 1;
+  const d = parseInt(dStr, 10) || 1;
+  const dt = new Date(y, m - 1, d + deltaDays);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
+    dt.getDate()
+  ).padStart(2, '0')}`;
+}
+
+function formatShortDateMeta(isoDate: string): { weekday: string; dayMonth: string } {
+  const [yStr, mStr, dStr] = isoDate.split('-');
+  const y = parseInt(yStr, 10) || new Date().getFullYear();
+  const m = parseInt(mStr, 10) || 1;
+  const d = parseInt(dStr, 10) || 1;
+  const dt = new Date(y, m - 1, d);
+  return {
+    weekday: dt.toLocaleDateString('en-US', { weekday: 'short' }),
+    dayMonth: dt.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }),
+  };
+}
 
 const SHIFT_HOURS = [
   { col: 1, value: '08:00', label: '08:00 AM', short: 'H1' },
@@ -72,6 +100,11 @@ const SHIFT_HOURS = [
   { col: 10, value: '17:00', label: '05:00 PM', short: 'H10' },
   { col: 11, value: '18:00', label: '06:00 PM', short: 'H11' },
 ];
+
+const DEFAULT_CHECKER_SLOT_NAMES = Array.from(
+  { length: 12 },
+  (_, idx) => `Checker ${String(idx + 1).padStart(2, '0')}`
+);
 
 const CLIENT_COLOR_MAP: Record<
   string,
@@ -272,78 +305,34 @@ export function QualityManagement({
     return '';
   };
 
+  const checkerSlots = useMemo<QualityCheckerStationEntity[]>(() => {
+    return DEFAULT_CHECKER_SLOT_NAMES.map((slotName, idx) => {
+      const slotNum = idx + 1;
+      const existing =
+        checkers.find((st) => st.name.trim().toLowerCase() === slotName.toLowerCase()) ||
+        checkers.find((st) => st.stationNumber === slotNum);
+      if (existing) {
+        return {
+          ...existing,
+          name: slotName,
+          stationNumber: slotNum,
+          status: existing.status || 'Active',
+        };
+      }
+      return {
+        id: `slot-${String(slotNum).padStart(2, '0')}`,
+        stationNumber: slotNum,
+        name: slotName,
+        employeeName: '',
+        status: 'Active',
+        isActive: true,
+      };
+    });
+  }, [checkers]);
+
   const getStationAssignedChecker = (st: QualityCheckerStationEntity | undefined | null): string => {
     if (!st) return '';
-    return resolveRealEmployeeLabel(st.employeeName) || (st.employeeName || '').trim() || (st.name || '').trim();
-  };
-
-  const getEmployeeCheckerStation = (emp: EmployeeEntity): QualityCheckerStationEntity | undefined => {
-    const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
-    return (
-      findStationWithEmployee(empLabel) ||
-      checkers.find(
-        (st) =>
-          (st.employeeName || '').trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
-          st.name.trim().toLowerCase() === emp.fullName.trim().toLowerCase()
-      )
-    );
-  };
-
-  const handleSetCheckerEmployeeDailyStatus = async (
-    emp: EmployeeEntity,
-    nextStatus: CheckerOperationalStatus
-  ) => {
-    const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
-    const existing = getEmployeeCheckerStation(emp);
-    setIsSubmitting(true);
-    const res = await saveCheckerStationAction(
-      {
-        name: existing ? existing.name : emp.fullName,
-        status: nextStatus,
-        employeeName: empLabel,
-      },
-      existing?.id
-    );
-    setIsSubmitting(false);
-    if (!res.success || !res.checker) {
-      showError(res.error || 'Failed to update employee checker status.');
-      return;
-    }
-    const saved = res.checker;
-    setCheckers((prev) => {
-      const exists = prev.some((s) => s.id === saved.id);
-      return exists ? prev.map((s) => (s.id === saved.id ? saved : s)) : [...prev, saved];
-    });
-    if (nextStatus === 'Active') {
-      setPlanStationName(saved.name);
-    }
-    showSuccess(`${emp.fullName} daily checker status updated to ${nextStatus}.`);
-  };
-
-  const handleSetExternalCheckerStatus = async (
-    st: QualityCheckerStationEntity,
-    nextStatus: CheckerOperationalStatus
-  ) => {
-    setIsSubmitting(true);
-    const res = await saveCheckerStationAction(
-      {
-        name: st.name,
-        status: nextStatus,
-        employeeName: (st.employeeName || '').trim() || st.name,
-      },
-      st.id
-    );
-    setIsSubmitting(false);
-    if (!res.success || !res.checker) {
-      showError(res.error || 'Failed to update checker status.');
-      return;
-    }
-    const saved = res.checker;
-    setCheckers((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
-    if (nextStatus === 'Active' && !planStationName) {
-      setPlanStationName(saved.name);
-    }
-    showSuccess(`${st.name} daily status updated to ${nextStatus}.`);
+    return resolveRealEmployeeLabel(st.employeeName);
   };
 
   const findStationWithEmployee = (
@@ -355,12 +344,17 @@ export function QualityManagement({
     if (!resolved) return undefined;
     const normExcludeName = (excludeStationName || '').trim().toLowerCase();
 
-    return checkers.find((st) => {
+    return checkerSlots.find((st) => {
       if (excludeStationId && st.id === excludeStationId) return false;
       if (normExcludeName && st.name.trim().toLowerCase() === normExcludeName) return false;
       const stEmp = getStationAssignedChecker(st);
       return stEmp === resolved;
     });
+  };
+
+  const getEmployeeCheckerStation = (emp: EmployeeEntity): QualityCheckerStationEntity | undefined => {
+    const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
+    return findStationWithEmployee(empLabel);
   };
 
   const getCompanyColor = (companyName: string) => {
@@ -372,89 +366,8 @@ export function QualityManagement({
   };
 
   // ============================================================================
-  // 1. CHECKER STATIONS CRUD STATE & HANDLERS
+  // 1. CHECKER SLOTS STAFF ASSIGNMENT HANDLER
   // ============================================================================
-  const [editingStationId, setEditingStationId] = useState<string | null>(null);
-  const [stationNameInput, setStationNameInput] = useState('');
-  const [stationStatusInput, setStationStatusInput] = useState<CheckerOperationalStatus>('Active');
-
-  const resetStationForm = () => {
-    setEditingStationId(null);
-    setStationNameInput('');
-    setStationStatusInput('Active');
-  };
-
-  const handleEditStation = (st: QualityCheckerStationEntity) => {
-    setEditingStationId(st.id);
-    setStationNameInput(st.name);
-    setStationStatusInput(st.status);
-  };
-
-  const handleStationSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const nameTrim = stationNameInput.trim();
-    if (nameTrim.length < 2 || nameTrim.length > 60) {
-      showError('Checker Station Name must be between 2 and 60 characters.');
-      return;
-    }
-    if (
-      checkers.some(
-        (st) => st.name.toLowerCase() === nameTrim.toLowerCase() && st.id !== editingStationId
-      )
-    ) {
-      showError(`Checker Station "${nameTrim}" is already registered.`);
-      return;
-    }
-
-    const existingStation = editingStationId
-      ? checkers.find((st) => st.id === editingStationId)
-      : undefined;
-    const preservedEmp = existingStation ? getStationAssignedChecker(existingStation) : nameTrim;
-
-    setIsSubmitting(true);
-    const res = await saveCheckerStationAction(
-      {
-        name: nameTrim,
-        status: stationStatusInput,
-        employeeName: preservedEmp || nameTrim,
-      },
-      editingStationId || undefined
-    );
-    setIsSubmitting(false);
-
-    if (!res.success || !res.checker) {
-      showError(res.error || 'Failed to save checker station.');
-      return;
-    }
-
-    const saved = res.checker;
-    setCheckers((prev) =>
-      editingStationId
-        ? prev.map((item) => (item.id === editingStationId ? saved : item))
-        : [...prev, saved]
-    );
-    showSuccess(
-      editingStationId
-        ? `Checker Station "${saved.name}" updated.`
-        : `Checker Station "${saved.name}" registered.`
-    );
-    resetStationForm();
-  };
-
-  const handleDeleteStation = async (st: QualityCheckerStationEntity) => {
-    setIsSubmitting(true);
-    const res = await deleteCheckerStationAction(st.id);
-    setIsSubmitting(false);
-    if (!res.success) {
-      showError(res.error || 'Failed to delete checker station.');
-      return;
-    }
-    setCheckers((prev) => prev.filter((item) => item.id !== st.id));
-    setBlocks((prev) => prev.filter((b) => b.stationId !== st.id && b.stationName !== st.name));
-    if (editingStationId === st.id) resetStationForm();
-    showSuccess(`Checker Station "${st.name}" deleted.`);
-  };
-
   const handleQuickAssignStationEmployee = async (
     st: QualityCheckerStationEntity,
     nextEmpRaw: string
@@ -470,28 +383,47 @@ export function QualityManagement({
       }
     }
 
+    const isVirtualSlot = st.id.startsWith('slot-');
     const prevEmp = st.employeeName;
-    setCheckers((prev) =>
-      prev.map((item) => (item.id === st.id ? { ...item, employeeName: validEmp } : item))
-    );
+
+    if (!isVirtualSlot) {
+      setCheckers((prev) =>
+        prev.map((item) => (item.id === st.id ? { ...item, employeeName: validEmp } : item))
+      );
+    }
     if (planStationName === st.name) {
       setPlanCheckerEmp(validEmp);
     }
 
-    const res = await assignCheckerEmployeeAction(st.id, validEmp);
+    const res = isVirtualSlot
+      ? await saveCheckerStationAction({
+          name: st.name,
+          status: 'Active',
+          employeeName: validEmp,
+        })
+      : await assignCheckerEmployeeAction(st.id, validEmp);
+
     if (!res.success || !res.checker) {
-      setCheckers((prev) =>
-        prev.map((item) => (item.id === st.id ? { ...item, employeeName: prevEmp } : item))
-      );
-      showError(res.error || `Failed to assign checker to ${st.name}.`);
+      if (!isVirtualSlot) {
+        setCheckers((prev) =>
+          prev.map((item) => (item.id === st.id ? { ...item, employeeName: prevEmp } : item))
+        );
+      }
+      showError(res.error || `Failed to assign staff to ${st.name}.`);
       return;
     }
 
-    setCheckers((prev) => prev.map((item) => (item.id === st.id ? res.checker! : item)));
+    const savedChecker = res.checker;
+    setCheckers((prev) => {
+      const exists = prev.some((item) => item.id === savedChecker.id);
+      return exists
+        ? prev.map((item) => (item.id === savedChecker.id ? savedChecker : item))
+        : [...prev, savedChecker];
+    });
     if (validEmp) {
       setBlocks((prev) =>
         prev.map((b) =>
-          (b.stationId === st.id || b.stationName === st.name) && b.date >= todayStr
+          (b.stationId === savedChecker.id || b.stationName === st.name) && b.date >= todayStr
             ? { ...b, checkerName: validEmp }
             : b
         )
@@ -500,7 +432,7 @@ export function QualityManagement({
     showSuccess(
       validEmp
         ? `Assigned ${validEmp} to ${st.name}.`
-        : `Cleared checker assignment for ${st.name}. Assign a checker before scheduling.`
+        : `Cleared staff assignment for ${st.name} (slot remains ready for scheduling).`
     );
   };
 
@@ -513,10 +445,9 @@ export function QualityManagement({
   const [calendarMonth, setCalendarMonth] = useState(() => todayStr.slice(0, 7));
   const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
   const [planShift, setPlanShift] = useState<'day' | 'night'>('day');
-  const [planStationName, setPlanStationName] = useState('');
+  const [planStationName, setPlanStationName] = useState(DEFAULT_CHECKER_SLOT_NAMES[0]);
   const [planCompany, setPlanCompany] = useState('');
   const [planStyleId, setPlanStyleId] = useState('');
-  const [planPartName, setPlanPartName] = useState('');
   const [planSize, setPlanSize] = useState('Free Size');
   const [planStartTime, setPlanStartTime] = useState('08:00');
   const [planEndTime, setPlanEndTime] = useState('18:00');
@@ -526,6 +457,37 @@ export function QualityManagement({
   // Inline Click-to-Type Today Delivery Qty on 4-Box Style Summary Cards
   const [editingDeliveryStyleId, setEditingDeliveryStyleId] = useState<string | null>(null);
   const [editingDeliveryValue, setEditingDeliveryValue] = useState<string>('');
+
+  // Daily Style-Wise Delivery Plan Table State
+  const [deliveryPlanStartDate, setDeliveryPlanStartDate] = useState<string>(todayStr);
+  const [deliveryPlanDays, setDeliveryPlanDays] = useState<7 | 10 | 14>(7);
+  const [deliveryPlanCompanyFilter, setDeliveryPlanCompanyFilter] = useState<string>('ALL');
+  const [deliveryPlanSearch, setDeliveryPlanSearch] = useState<string>('');
+  const [deliveryPlanIncludeDone, setDeliveryPlanIncludeDone] = useState<boolean>(false);
+  const [deliveryDraftMap, setDeliveryDraftMap] = useState<Record<string, string>>({});
+  const [savingDeliveryCellKey, setSavingDeliveryCellKey] = useState<string | null>(null);
+
+  // Delivery vs Plan Qty Confirmation Alert Dialog (<dialog>)
+  const deliveryAlertDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [pendingDeliveryAlert, setPendingDeliveryAlert] = useState<
+    | {
+        kind: 'delivery';
+        style: StyleMasterEntity;
+        date: string;
+        nextDeliveryQty: number;
+        dayPlanQty: number;
+        draftKey?: string;
+      }
+    | {
+        kind: 'schedule';
+        style: StyleMasterEntity;
+        date: string;
+        newDayPlanTotal: number;
+        dayDeliveryQty: number;
+        onConfirm: () => Promise<void>;
+      }
+    | null
+  >(null);
 
   // Done Checked Styles Tab Filters
   const [doneSearchQuery, setDoneSearchQuery] = useState('');
@@ -544,7 +506,6 @@ export function QualityManagement({
   const [modalActualQtyInput, setModalActualQtyInput] = useState<string>('0');
   const [modalDefectQtyInput, setModalDefectQtyInput] = useState<string>('0');
   const [modalSize, setModalSize] = useState('Free Size');
-  const [modalPartName, setModalPartName] = useState('');
   const [modalCheckerEmp, setModalCheckerEmp] = useState('');
   const [modalStartCol, setModalStartCol] = useState<number>(1);
   const [modalEndCol, setModalEndCol] = useState<number>(11);
@@ -613,12 +574,12 @@ export function QualityManagement({
 
   // Sync default station & company dropdowns
   useEffect(() => {
-    if (!planStationName && checkers.length > 0) {
-      setPlanStationName(checkers[0].name);
-    } else if (planStationName && !checkers.some((c) => c.name === planStationName)) {
-      setPlanStationName(checkers[0]?.name || '');
+    if (!planStationName && checkerSlots.length > 0) {
+      setPlanStationName(checkerSlots[0].name);
+    } else if (planStationName && !checkerSlots.some((c) => c.name === planStationName)) {
+      setPlanStationName(checkerSlots[0]?.name || DEFAULT_CHECKER_SLOT_NAMES[0]);
     }
-  }, [checkers, planStationName]);
+  }, [checkerSlots, planStationName]);
 
   useEffect(() => {
     if (!planCompany && companies.length > 0) {
@@ -628,7 +589,7 @@ export function QualityManagement({
     }
   }, [companies, planCompany]);
 
-  // Helper to get Today Delivery Qty for a style on planDate
+  // Helper to get exact-date Delivery Qty for a style on targetDate
   const getDeliveryTargetForStyle = (style: StyleMasterEntity, targetDate: string): number => {
     const exactDateTarget = deliveryTargets.find(
       (t) =>
@@ -636,14 +597,32 @@ export function QualityManagement({
         ((t.styleId && t.styleId === style.id) ||
           t.styleName.trim().toLowerCase() === style.name.trim().toLowerCase())
     );
-    if (exactDateTarget) return exactDateTarget.deliveryQty;
+    return exactDateTarget ? exactDateTarget.deliveryQty : 0;
+  };
 
-    const anyDateTarget = deliveryTargets.find(
-      (t) =>
-        (t.styleId && t.styleId === style.id) ||
-        t.styleName.trim().toLowerCase() === style.name.trim().toLowerCase()
-    );
-    return anyDateTarget ? anyDateTarget.deliveryQty : 0;
+  // Helper to get exact-date Planned Checking Qty for a style on targetDate
+  const getStyleDatePlanQty = (style: StyleMasterEntity, targetDate: string): number => {
+    return blocks
+      .filter((b) => {
+        if (b.date !== targetDate) return false;
+        return (
+          (b.styleId && b.styleId === style.id) ||
+          (b.styleCode && style.code && b.styleCode === style.code) ||
+          b.styleName.trim().toLowerCase() === style.name.trim().toLowerCase()
+        );
+      })
+      .reduce((sum, b) => sum + b.planQty, 0);
+  };
+
+  // Helper to get All-Dates Total Planned Delivery Qty for a style
+  const getStyleTotalDeliveryPlanned = (style: StyleMasterEntity): number => {
+    return deliveryTargets
+      .filter(
+        (t) =>
+          (t.styleId && t.styleId === style.id) ||
+          t.styleName.trim().toLowerCase() === style.name.trim().toLowerCase()
+      )
+      .reduce((sum, t) => sum + t.deliveryQty, 0);
   };
 
   // Aggregate Per-Style Checking Metrics across ALL quality blocks
@@ -654,6 +633,7 @@ export function QualityManagement({
         style: StyleMasterEntity;
         orderQty: number;
         plannedCheckingQty: number;
+        todayPlanQty: number;
         actualDoneQty: number;
         defectQty: number;
         remainingQty: number;
@@ -668,6 +648,7 @@ export function QualityManagement({
         style: s,
         orderQty: s.qty,
         plannedCheckingQty: 0,
+        todayPlanQty: 0,
         actualDoneQty: 0,
         defectQty: 0,
         remainingQty: s.qty,
@@ -687,6 +668,9 @@ export function QualityManagement({
         );
       if (matched) {
         matched.plannedCheckingQty += b.planQty;
+        if (b.date === planDate) {
+          matched.todayPlanQty += b.planQty;
+        }
         matched.actualDoneQty += b.actualQty;
         matched.defectQty += b.defectQty || 0;
         matched.remainingQty = Math.max(0, matched.orderQty - matched.actualDoneQty);
@@ -819,10 +803,6 @@ export function QualityManagement({
 
   useEffect(() => {
     if (selectedPlanStyle) {
-      const firstPart = selectedPlanStyle.parts[0]?.name || 'Final QC';
-      setPlanPartName((prev) =>
-        selectedPlanStyle.parts.some((p) => p.name === prev) ? prev : firstPart
-      );
       if (selectedPlanStyleSizes.length > 0) {
         setPlanSize((prev) =>
           selectedPlanStyleSizes.some((sz) => sz.size === prev)
@@ -833,18 +813,17 @@ export function QualityManagement({
         setPlanSize('Free Size');
       }
     } else {
-      setPlanPartName('');
       setPlanSize('Free Size');
     }
   }, [selectedPlanStyle, selectedPlanStyleSizes]);
 
-  // Sync Checker Employee in form to the selected Checker Station's assigned employee
+  // Sync Checker Employee in form to the selected Checker Slot's assigned employee (if any)
   useEffect(() => {
-    const selectedSt = checkers.find((c) => c.name === planStationName);
+    const selectedSt = checkerSlots.find((c) => c.name === planStationName);
     const stEmp = getStationAssignedChecker(selectedSt);
     setPlanCheckerEmp(stEmp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planStationName, checkers, activeEmployees]);
+  }, [planStationName, checkerSlots, activeEmployees]);
 
   // Filtered blocks for currently selected Date & Shift
   const activeDateShiftBlocks = useMemo(
@@ -963,34 +942,79 @@ export function QualityManagement({
   };
 
   // ============================================================================
-  // TODAY DELIVERY QTY INLINE SAVE
+  // TODAY DELIVERY QTY & DAILY DELIVERY PLAN SAVE + STRICT ALERT RULE
   // ============================================================================
-  const startEditingDeliveryQty = (style: StyleMasterEntity, currentVal: number) => {
-    setEditingDeliveryStyleId(style.id);
-    setEditingDeliveryValue(String(currentVal));
+  const deliveryPlanDates = useMemo(() => {
+    const start = deliveryPlanStartDate || todayStr;
+    return Array.from({ length: deliveryPlanDays }, (_, idx) => addDaysIso(start, idx));
+  }, [deliveryPlanStartDate, deliveryPlanDays, todayStr]);
+
+  const filteredDeliveryPlanRows = useMemo(() => {
+    const base = deliveryPlanIncludeDone ? styleQualityMetricsMap : activeStylesMetrics;
+    const q = deliveryPlanSearch.trim().toLowerCase();
+    return base.filter((item) => {
+      if (deliveryPlanCompanyFilter !== 'ALL') {
+        if (
+          item.style.company.trim().toLowerCase() !==
+          deliveryPlanCompanyFilter.trim().toLowerCase()
+        ) {
+          return false;
+        }
+      }
+      if (q) {
+        const matchesCode = item.style.code.toLowerCase().includes(q);
+        const matchesName = item.style.name.toLowerCase().includes(q);
+        const matchesCompany = item.style.company.toLowerCase().includes(q);
+        if (!matchesCode && !matchesName && !matchesCompany) return false;
+      }
+      return true;
+    });
+  }, [
+    deliveryPlanIncludeDone,
+    styleQualityMetricsMap,
+    activeStylesMetrics,
+    deliveryPlanCompanyFilter,
+    deliveryPlanSearch,
+  ]);
+
+  const clearDeliveryDraftKey = (draftKey?: string) => {
+    if (!draftKey) return;
+    setDeliveryDraftMap((prev) => {
+      if (!(draftKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[draftKey];
+      return next;
+    });
   };
 
-  const commitDeliveryQty = async (style: StyleMasterEntity) => {
-    if (editingDeliveryStyleId !== style.id) return;
-    const parsed = Math.max(0, parseInt(editingDeliveryValue.trim(), 10) || 0);
-    setEditingDeliveryStyleId(null);
-
-    if (style.qty > 0 && parsed > style.qty) {
-      showError(
-        `Today Delivery Qty (${parsed.toLocaleString()} Pcs) cannot exceed Total Order Qty (${style.qty.toLocaleString()} Pcs).`
-      );
-      return;
+  const closeDeliveryAlertDialog = (revertDraft = true) => {
+    if (revertDraft && pendingDeliveryAlert?.kind === 'delivery' && pendingDeliveryAlert.draftKey) {
+      clearDeliveryDraftKey(pendingDeliveryAlert.draftKey);
     }
+    if (deliveryAlertDialogRef.current && deliveryAlertDialogRef.current.open) {
+      deliveryAlertDialogRef.current.close();
+    }
+    setPendingDeliveryAlert(null);
+  };
 
+  const executeSaveDeliveryQty = async (
+    style: StyleMasterEntity,
+    targetDate: string,
+    parsed: number,
+    draftKey?: string
+  ) => {
+    if (draftKey) setSavingDeliveryCellKey(draftKey);
     const res = await saveQualityDeliveryTargetAction({
       styleId: style.id,
       styleName: style.name,
-      date: planDate,
+      date: targetDate,
       deliveryQty: parsed,
     });
+    if (draftKey) setSavingDeliveryCellKey(null);
 
     if (!res.success || !res.target) {
-      showError(res.error || 'Failed to save Today Delivery Qty.');
+      clearDeliveryDraftKey(draftKey);
+      showError(res.error || 'Failed to save Delivery Qty.');
       return;
     }
 
@@ -1008,11 +1032,91 @@ export function QualityManagement({
       }
       return [saved, ...prev];
     });
+    clearDeliveryDraftKey(draftKey);
     showSuccess(
-      `Updated Today Delivery Qty for "${style.code ? `${style.code} — ` : ''}${
+      `Updated Delivery Qty for "${style.code ? `${style.code} — ` : ''}${
         style.name
-      }" on ${planDate} to ${saved.deliveryQty.toLocaleString()} Pcs.`
+      }" on ${targetDate} to ${saved.deliveryQty.toLocaleString()} Pcs.`
     );
+  };
+
+  const requestSaveDeliveryQty = async (
+    style: StyleMasterEntity,
+    targetDate: string,
+    parsed: number,
+    draftKey?: string
+  ) => {
+    if (style.qty > 0 && parsed > style.qty) {
+      clearDeliveryDraftKey(draftKey);
+      showError(
+        `Delivery Qty (${parsed.toLocaleString()} Pcs) cannot exceed Total Order Qty (${style.qty.toLocaleString()} Pcs).`
+      );
+      return;
+    }
+
+    const existingVal = getDeliveryTargetForStyle(style, targetDate);
+    if (parsed === existingVal) {
+      clearDeliveryDraftKey(draftKey);
+      return;
+    }
+
+    const dayPlanQty = getStyleDatePlanQty(style, targetDate);
+    if (dayPlanQty > 0 && parsed <= dayPlanQty) {
+      setPendingDeliveryAlert({
+        kind: 'delivery',
+        style,
+        date: targetDate,
+        nextDeliveryQty: parsed,
+        dayPlanQty,
+        draftKey,
+      });
+      if (deliveryAlertDialogRef.current && !deliveryAlertDialogRef.current.open) {
+        deliveryAlertDialogRef.current.showModal();
+      }
+      return;
+    }
+
+    await executeSaveDeliveryQty(style, targetDate, parsed, draftKey);
+  };
+
+  const confirmDeliveryAlertDialog = async () => {
+    const alertState = pendingDeliveryAlert;
+    if (!alertState) return;
+    if (deliveryAlertDialogRef.current && deliveryAlertDialogRef.current.open) {
+      deliveryAlertDialogRef.current.close();
+    }
+    setPendingDeliveryAlert(null);
+
+    if (alertState.kind === 'delivery') {
+      await executeSaveDeliveryQty(
+        alertState.style,
+        alertState.date,
+        alertState.nextDeliveryQty,
+        alertState.draftKey
+      );
+    } else if (alertState.kind === 'schedule') {
+      await alertState.onConfirm();
+    }
+  };
+
+  const startEditingDeliveryQty = (style: StyleMasterEntity, currentVal: number) => {
+    setEditingDeliveryStyleId(style.id);
+    setEditingDeliveryValue(String(currentVal));
+  };
+
+  const commitDeliveryQty = async (style: StyleMasterEntity) => {
+    if (editingDeliveryStyleId !== style.id) return;
+    const parsed = Math.max(0, parseInt(editingDeliveryValue.trim(), 10) || 0);
+    setEditingDeliveryStyleId(null);
+    await requestSaveDeliveryQty(style, planDate, parsed);
+  };
+
+  const commitDeliveryPlanCell = async (style: StyleMasterEntity, targetDate: string) => {
+    const draftKey = `${style.id}::${targetDate}`;
+    if (!(draftKey in deliveryDraftMap)) return;
+    const raw = (deliveryDraftMap[draftKey] ?? '').trim();
+    const parsed = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0);
+    await requestSaveDeliveryQty(style, targetDate, parsed, draftKey);
   };
 
   // ============================================================================
@@ -1091,30 +1195,25 @@ export function QualityManagement({
       return;
     }
     if (!planStationName) {
-      showError('Please select a Checker Station first.');
+      showError('Please select a Checker Slot first.');
       return;
     }
-    const matchedStation = checkers.find((c) => c.name === planStationName);
+    const matchedStation = checkerSlots.find((c) => c.name === planStationName);
     const validSelectedChecker =
       resolveRealEmployeeLabel(planCheckerEmp) || getStationAssignedChecker(matchedStation);
 
-    if (!validSelectedChecker) {
-      showError(
-        `${planStationName} ekata aththa Checker kenek assign karala na! Palamuvenma ${planStationName} ekata Checker kenek assign karanna (Checker nathuwa checking plan danna ba).`
+    if (validSelectedChecker) {
+      const conflictSt = findStationWithEmployee(
+        validSelectedChecker,
+        matchedStation?.id,
+        planStationName
       );
-      return;
-    }
-
-    const conflictSt = findStationWithEmployee(
-      validSelectedChecker,
-      matchedStation?.id,
-      planStationName
-    );
-    if (conflictSt) {
-      showError(
-        `${validSelectedChecker} danatamath ${conflictSt.name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
-      );
-      return;
+      if (conflictSt) {
+        showError(
+          `${validSelectedChecker} danatamath ${conflictSt.name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
+        );
+        return;
+      }
     }
 
     if (!selectedPlanStyle) {
@@ -1177,48 +1276,73 @@ export function QualityManagement({
       }
     }
 
-    setIsSubmitting(true);
-    const res = await saveQualityBlockAction({
-      stationId: matchedStation?.id || null,
-      stationName: planStationName,
-      checkerName: validSelectedChecker,
-      styleId: selectedPlanStyle.id,
-      styleCode: selectedPlanStyle.code,
-      styleName: selectedPlanStyle.name,
-      partName: planPartName || 'Final QC',
-      clientName: selectedPlanStyle.company,
-      date: scheduleDate,
-      shift: planShift,
-      size: planSize || 'Free Size',
-      startHour: startCol,
-      spanHours,
-      planQty,
-      actualQty: 0,
-      defectQty: 0,
-    });
-    setIsSubmitting(false);
+    const executeScheduleSubmit = async () => {
+      setIsSubmitting(true);
+      const res = await saveQualityBlockAction({
+        stationId:
+          matchedStation && !matchedStation.id.startsWith('slot-') ? matchedStation.id : null,
+        stationName: planStationName,
+        checkerName: validSelectedChecker || planStationName,
+        styleId: selectedPlanStyle.id,
+        styleCode: selectedPlanStyle.code,
+        styleName: selectedPlanStyle.name,
+        partName: 'Final QC',
+        clientName: selectedPlanStyle.company,
+        date: scheduleDate,
+        shift: planShift,
+        size: planSize || 'Free Size',
+        startHour: startCol,
+        spanHours,
+        planQty,
+        actualQty: 0,
+        defectQty: 0,
+      });
+      setIsSubmitting(false);
 
-    if (!res.success || !res.block) {
-      showError(res.error || 'Failed to schedule quality checking block.');
+      if (!res.success || !res.block) {
+        showError(res.error || 'Failed to schedule quality checking block.');
+        return;
+      }
+
+      const createdBlock = res.block;
+      setBlocks((prev) => [...prev, createdBlock]);
+      setPlanDate(scheduleDate);
+      setCalendarMonth(scheduleDate.slice(0, 7));
+      if (validSelectedChecker) {
+        setCheckers((prev) =>
+          prev.map((st) =>
+            st.name === planStationName ? { ...st, employeeName: validSelectedChecker } : st
+          )
+        );
+      }
+      showSuccess(
+        `Scheduled Checking for ${
+          selectedPlanStyle.code
+            ? `${selectedPlanStyle.code} (${selectedPlanStyle.name})`
+            : selectedPlanStyle.name
+        } on ${planStationName} (${scheduleDate}) [H${startCol}–H${endCol}].`
+      );
+    };
+
+    const existingDatePlanQty = getStyleDatePlanQty(selectedPlanStyle, scheduleDate);
+    const newDayPlanTotal = existingDatePlanQty + planQty;
+    const dateDeliveryQty = getDeliveryTargetForStyle(selectedPlanStyle, scheduleDate);
+    if (dateDeliveryQty > 0 && dateDeliveryQty <= newDayPlanTotal) {
+      setPendingDeliveryAlert({
+        kind: 'schedule',
+        style: selectedPlanStyle,
+        date: scheduleDate,
+        newDayPlanTotal,
+        dayDeliveryQty: dateDeliveryQty,
+        onConfirm: executeScheduleSubmit,
+      });
+      if (deliveryAlertDialogRef.current && !deliveryAlertDialogRef.current.open) {
+        deliveryAlertDialogRef.current.showModal();
+      }
       return;
     }
 
-    const createdBlock = res.block;
-    setBlocks((prev) => [...prev, createdBlock]);
-    setPlanDate(scheduleDate);
-    setCalendarMonth(scheduleDate.slice(0, 7));
-    setCheckers((prev) =>
-      prev.map((st) =>
-        st.name === planStationName ? { ...st, employeeName: validSelectedChecker } : st
-      )
-    );
-    showSuccess(
-      `Scheduled Checking for ${
-        selectedPlanStyle.code
-          ? `${selectedPlanStyle.code} (${selectedPlanStyle.name})`
-          : selectedPlanStyle.name
-      } on ${planStationName} (${scheduleDate}) [H${startCol}–H${endCol}].`
-    );
+    await executeScheduleSubmit();
   };
 
   // ============================================================================
@@ -1563,13 +1687,10 @@ export function QualityManagement({
       return;
     }
 
-    const targetStChecker = getStationAssignedChecker(targetStation);
-    if (!targetStChecker) {
-      showError(
-        `${targetStation.name} ekata aththa Checker kenek assign karala na! Palamuvenma ${targetStation.name} ekata Checker kenek assign karanna (Checker nathuwa move karanna ba).`
-      );
-      return;
-    }
+    const targetStChecker = getStationAssignedChecker(targetStation) || targetStation.name;
+    const effectiveTargetStationId = targetStation.id.startsWith('slot-')
+      ? null
+      : targetStation.id;
 
     const targetStationBlocks = activeDateShiftBlocks.filter(
       (b) => b.stationName === targetStation.name && b.id !== source.id
@@ -1586,7 +1707,7 @@ export function QualityManagement({
           overlap.styleCode || overlap.styleName
         }" on H${overlap.startHour}–H${
           overlap.startHour + overlap.spanHours - 1
-        }. Drop onto free hours or another Checker Station.`
+        }. Drop onto free hours or another Checker Slot.`
       );
       return;
     }
@@ -1601,7 +1722,7 @@ export function QualityManagement({
         b.id === source.id
           ? {
               ...b,
-              stationId: targetStation.id,
+              stationId: effectiveTargetStationId,
               stationName: targetStation.name,
               startHour: nextStartCol,
               checkerName: targetStChecker,
@@ -1613,7 +1734,7 @@ export function QualityManagement({
     setIsSubmitting(true);
     const res = await saveQualityBlockAction(
       {
-        stationId: targetStation.id,
+        stationId: effectiveTargetStationId,
         stationName: targetStation.name,
         checkerName: targetStChecker,
         styleId: source.styleId,
@@ -1668,16 +1789,15 @@ export function QualityManagement({
   const findNextAvailableStationForBlock = (block: QualityBlockEntity): string => {
     const startCol = block.startHour;
     const endCol = block.startHour + block.spanHours - 1;
-    const currentIdx = checkers.findIndex((c) => c.name === block.stationName);
+    const currentIdx = checkerSlots.findIndex((c) => c.name === block.stationName);
 
     const orderedCheckers =
       currentIdx >= 0
-        ? [...checkers.slice(currentIdx + 1), ...checkers.slice(0, currentIdx + 1)]
-        : checkers;
+        ? [...checkerSlots.slice(currentIdx + 1), ...checkerSlots.slice(0, currentIdx + 1)]
+        : checkerSlots;
 
     for (const st of orderedCheckers) {
       if (st.name === block.stationName) continue;
-      if (!getStationAssignedChecker(st)) continue;
       const stBlocks = blocks.filter(
         (b) => b.date === block.date && b.shift === block.shift && b.stationName === st.name
       );
@@ -1704,8 +1824,7 @@ export function QualityManagement({
     setModalActualQtyInput(mode === 'duplicate' ? '0' : String(block.actualQty));
     setModalDefectQtyInput(mode === 'duplicate' ? '0' : String(block.defectQty || 0));
     setModalSize(block.size || 'Free Size');
-    setModalPartName(block.partName || 'Final QC');
-    const targetStObj = checkers.find((c) => c.name === defaultTargetStation);
+    const targetStObj = checkerSlots.find((c) => c.name === defaultTargetStation);
     const resolvedChecker =
       mode === 'duplicate'
         ? getStationAssignedChecker(targetStObj)
@@ -1765,27 +1884,22 @@ export function QualityManagement({
 
     const spanHours = modalEndCol - modalStartCol + 1;
     const targetStationName = modalStationName || editingBlock.stationName;
-    const matchedStation = checkers.find((c) => c.name === targetStationName);
+    const matchedStation = checkerSlots.find((c) => c.name === targetStationName);
     const validModalChecker =
       resolveRealEmployeeLabel(modalCheckerEmp) || getStationAssignedChecker(matchedStation);
 
-    if (!validModalChecker) {
-      showError(
-        `${targetStationName} ekata aththa Checker kenek assign karala na! Palamuvenma ${targetStationName} ekata Checker kenek assign karanna.`
+    if (validModalChecker) {
+      const conflictSt = findStationWithEmployee(
+        validModalChecker,
+        matchedStation?.id,
+        targetStationName
       );
-      return;
-    }
-
-    const conflictSt = findStationWithEmployee(
-      validModalChecker,
-      matchedStation?.id,
-      targetStationName
-    );
-    if (conflictSt) {
-      showError(
-        `${validModalChecker} danatamath ${conflictSt.name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
-      );
-      return;
+      if (conflictSt) {
+        showError(
+          `${validModalChecker} danatamath ${conflictSt.name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
+        );
+        return;
+      }
     }
 
     const overlap = blocks.find((b) => {
@@ -1808,7 +1922,7 @@ export function QualityManagement({
           overlap.styleCode || overlap.styleName
         }" on H${overlap.startHour}–H${
           overlap.startHour + overlap.spanHours - 1
-        }. Choose another Checker Station or Start/End Hour.`
+        }. Choose another Checker Slot or Start/End Hour.`
       );
       return;
     }
@@ -1816,13 +1930,16 @@ export function QualityManagement({
     setIsSubmitting(true);
     const res = await saveQualityBlockAction(
       {
-        stationId: matchedStation?.id ?? editingBlock.stationId,
+        stationId:
+          matchedStation && !matchedStation.id.startsWith('slot-')
+            ? matchedStation.id
+            : null,
         stationName: targetStationName,
-        checkerName: validModalChecker,
+        checkerName: validModalChecker || targetStationName,
         styleId: editingBlock.styleId,
         styleCode: editingBlock.styleCode,
         styleName: editingBlock.styleName,
-        partName: modalPartName || 'Final QC',
+        partName: 'Final QC',
         clientName: editingBlock.clientName,
         date: editingBlock.date,
         shift: editingBlock.shift,
@@ -1851,11 +1968,13 @@ export function QualityManagement({
         ? [...prev, savedBlock]
         : prev.map((b) => (b.id === savedBlock.id ? savedBlock : b))
     );
-    setCheckers((prev) =>
-      prev.map((st) =>
-        st.name === savedBlock.stationName ? { ...st, employeeName: savedBlock.checkerName } : st
-      )
-    );
+    if (validModalChecker) {
+      setCheckers((prev) =>
+        prev.map((st) =>
+          st.name === savedBlock.stationName ? { ...st, employeeName: validModalChecker } : st
+        )
+      );
+    }
 
     closeManageBlockModal();
     showSuccess(
@@ -1893,13 +2012,9 @@ export function QualityManagement({
     let shiftActualTotal = 0;
     let shiftDeliveryTargetTotal = 0;
 
-    // Auto-cap Today Delivery Qty to Planned Checking Qty for live display integrity
+    // Sum exact-date Delivery Targets for active styles
     for (const item of activeStylesMetrics) {
-      const cappedDelivery =
-        item.plannedCheckingQty > 0
-          ? Math.min(item.todayDeliveryQty, item.plannedCheckingQty)
-          : item.todayDeliveryQty;
-      shiftDeliveryTargetTotal += cappedDelivery;
+      shiftDeliveryTargetTotal += item.todayDeliveryQty;
     }
 
     for (const b of activeDateShiftBlocks) {
@@ -1911,7 +2026,7 @@ export function QualityManagement({
       shiftDeliveryTargetTotal > 0 ? shiftDeliveryTargetTotal : shiftPlanTotal;
     const overallPct =
       targetDenominator > 0 ? Math.round((shiftActualTotal / targetDenominator) * 100) : 0;
-    const activeCheckersCount = checkers.filter((c) => c.status === 'Active').length;
+    const activeCheckersCount = checkerSlots.length;
 
     return {
       shiftPlanTotal,
@@ -1920,7 +2035,7 @@ export function QualityManagement({
       overallPct,
       activeCheckersCount,
     };
-  }, [activeDateShiftBlocks, activeStylesMetrics, checkers]);
+  }, [activeDateShiftBlocks, activeStylesMetrics, checkerSlots]);
 
   return (
     <div className="space-y-6">
@@ -1938,7 +2053,7 @@ export function QualityManagement({
                     Quality Checking &amp; Delivery Target Studio
                   </h2>
                   <span className="bg-emerald-500/30 text-emerald-100 text-[10px] px-2.5 py-0.5 rounded-full border border-emerald-400/30 font-semibold">
-                    Checking &amp; QC ({checkers.length} Checkers)
+                    Checking &amp; QC ({checkerSlots.length} Checker Slots)
                   </span>
                 </div>
                 <p className="text-xs text-blue-200/90 font-medium mt-0.5">
@@ -1962,6 +2077,11 @@ export function QualityManagement({
                     icon: Calendar,
                   },
                   {
+                    id: 'deliveryPlan',
+                    label: 'Daily Delivery Plan',
+                    icon: Truck,
+                  },
+                  {
                     id: 'floorDisplay',
                     label: 'Live Floor Display',
                     icon: Monitor,
@@ -1973,7 +2093,7 @@ export function QualityManagement({
                   },
                   {
                     id: 'checkerCrud',
-                    label: `Checkers (${checkerEmployees.length + checkers.length})`,
+                    label: `Checker Slots (${checkerSlots.length})`,
                     icon: Users,
                   },
                 ] as const
@@ -2054,7 +2174,7 @@ export function QualityManagement({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">
-                    Checking Dashboard Editor ({checkers.length} Checkers)
+                    Checking Dashboard Editor ({checkerSlots.length} Checker Slots)
                   </h3>
                   <p className="text-xs text-slate-500">
                     Connected to Style Master, Company CRUD &amp; Employee Registry
@@ -2239,10 +2359,23 @@ export function QualityManagement({
                 <Layers className="w-4 h-4 text-persian-500" />
                 Style-Wise Order &amp; Checking Breakdown ({activeStylesMetrics.length} Active Styles)
               </h3>
-              <span className="text-[11px] text-indigo-700 font-bold bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                <Truck className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Click &apos;Today Delivery Qty&apos; box on any style card to set daily delivery target</span>
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-indigo-700 font-bold bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Click &apos;Today Delivery Qty&apos; ({planDate}) to update</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeliveryPlanStartDate(planDate || todayStr);
+                    setSubTab('deliveryPlan');
+                  }}
+                  className="text-[11px] font-extrabold bg-persian-800 hover:bg-persian-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                >
+                  <Truck className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Daily Delivery Plan Sheet →</span>
+                </button>
+              </div>
             </div>
 
             {activeStylesMetrics.length === 0 ? (
@@ -2256,13 +2389,14 @@ export function QualityManagement({
                     style,
                     orderQty,
                     plannedCheckingQty,
+                    todayPlanQty,
                     actualDoneQty,
                     todayDeliveryQty,
                   } = item;
                   const cStyle = getCompanyColor(style.company);
                   const isEditingDelivery = editingDeliveryStyleId === style.id;
-                  const exceedsPlanned =
-                    todayDeliveryQty > 0 && todayDeliveryQty > plannedCheckingQty;
+                  const deliveryBelowOrEqualPlan =
+                    todayPlanQty > 0 && todayDeliveryQty <= todayPlanQty;
 
                   return (
                     <div
@@ -2302,8 +2436,11 @@ export function QualityManagement({
                           <span className="text-[9px] font-bold text-amber-700/85 block uppercase">
                             Planned Checking Qty
                           </span>
-                          <span className="font-black text-amber-600 text-sm font-mono">
+                          <span className="font-black text-amber-600 text-sm font-mono block leading-tight">
                             {plannedCheckingQty.toLocaleString()}
+                          </span>
+                          <span className="text-[9px] font-bold text-amber-700/90 font-mono block mt-0.5">
+                            Day Plan: {todayPlanQty.toLocaleString()}
                           </span>
                         </div>
 
@@ -2321,7 +2458,7 @@ export function QualityManagement({
                         {isEditingDelivery ? (
                           <div className="bg-indigo-100 p-1.5 rounded-lg border-2 border-indigo-500 flex flex-col justify-between">
                             <span className="text-[9px] font-extrabold text-indigo-900 block uppercase">
-                              Today Delivery ({planDate})
+                              Delivery ({planDate})
                             </span>
                             <input
                               type="number"
@@ -2347,23 +2484,47 @@ export function QualityManagement({
                           <button
                             type="button"
                             onClick={() => startEditingDeliveryQty(style, todayDeliveryQty)}
-                            title="Click to set Today Delivery Qty"
-                            className="bg-indigo-50/60 p-2 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 transition-colors text-left group"
+                            title={`Click to set Today Delivery Qty for ${planDate}`}
+                            className={`p-2 rounded-lg border cursor-pointer transition-colors text-left group ${
+                              deliveryBelowOrEqualPlan
+                                ? 'bg-rose-50/80 border-rose-300 hover:bg-rose-100'
+                                : 'bg-indigo-50/60 border-indigo-200 hover:bg-indigo-100'
+                            }`}
                           >
-                            <span className="text-[9px] font-bold text-indigo-700/85 flex items-center justify-between uppercase group-hover:text-indigo-900">
+                            <span
+                              className={`text-[9px] font-bold flex items-center justify-between uppercase ${
+                                deliveryBelowOrEqualPlan
+                                  ? 'text-rose-700 group-hover:text-rose-900'
+                                  : 'text-indigo-700/85 group-hover:text-indigo-900'
+                              }`}
+                            >
                               <span>Today Delivery Qty</span>
-                              <Pencil className="w-2.5 h-2.5 text-indigo-500" />
+                              <Pencil
+                                className={`w-2.5 h-2.5 ${
+                                  deliveryBelowOrEqualPlan ? 'text-rose-500' : 'text-indigo-500'
+                                }`}
+                              />
                             </span>
-                            <span className="font-black text-indigo-600 text-sm font-mono block">
+                            <span
+                              className={`font-black text-sm font-mono block leading-tight ${
+                                deliveryBelowOrEqualPlan ? 'text-rose-700' : 'text-indigo-600'
+                              }`}
+                            >
                               {todayDeliveryQty.toLocaleString()}
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-500 block mt-0.5">
+                              {planDate}
                             </span>
                           </button>
                         )}
                       </div>
 
-                      {exceedsPlanned && (
-                        <div className="text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
-                          Delivery target ({todayDeliveryQty.toLocaleString()}) &gt; Planned Checking ({plannedCheckingQty.toLocaleString()}). Auto-capped on Floor Display.
+                      {deliveryBelowOrEqualPlan && (
+                        <div className="text-[10px] font-bold text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                          <span>
+                            Delivery ({todayDeliveryQty.toLocaleString()}) ≤ Day Plan ({todayPlanQty.toLocaleString()}). Delivery must exceed Plan!
+                          </span>
                         </div>
                       )}
                     </div>
@@ -2373,182 +2534,15 @@ export function QualityManagement({
             )}
           </section>
 
-          {/* Assign Checker & Timeline Block Form */}
+          {/* Assign Checker Slot & Timeline Block Form */}
           <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-soft">
-            {/* Daily Checker Status & Dashboard Assignment (Our Checker Employees + External Checkers) */}
-            <div className="mb-5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-white to-teal-50/70 p-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <div>
-                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-900 flex items-center gap-1.5">
-                    <UserCheck className="w-4 h-4 text-indigo-600" />
-                    Daily Checker Attendance &amp; Dashboard Assignment ({scheduleDate || planDate})
-                  </h4>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Update today&apos;s status (<span className="font-bold text-emerald-700">Active</span> /{' '}
-                    <span className="font-bold text-amber-700">Break</span> /{' '}
-                    <span className="font-bold text-slate-500">Offline</span>) for Our Checker Employees &amp; External Checkers to assign them directly to today&apos;s Checking Plan.
-                  </p>
-                </div>
-                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  Active on Floor: {checkers.filter((c) => c.status === 'Active').length} / {checkers.length}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {/* 1. Our Checker Employees */}
-                <div className="rounded-xl border border-indigo-100 bg-white p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-700">
-                      Our Checker Employees ({checkerEmployees.length})
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-500">From Staff Registry</span>
-                  </div>
-                  {checkerEmployees.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic py-2">
-                      No internal staff with Checker / QC role found.
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                      {checkerEmployees.map((emp) => {
-                        const st = getEmployeeCheckerStation(emp);
-                        const currentStatus: CheckerOperationalStatus = st ? st.status : 'Offline';
-                        return (
-                          <div
-                            key={emp.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/70 px-2.5 py-1.5"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-800 truncate">
-                                EPF #{emp.epfNo} - {emp.fullName}
-                              </div>
-                              <div className="text-[10px] text-slate-500 font-medium">
-                                {emp.role} {st ? `• Station: ${st.name}` : '• Not yet on board'}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
-                                const isCurrent = currentStatus === statusOpt && Boolean(st);
-                                return (
-                                  <button
-                                    key={statusOpt}
-                                    type="button"
-                                    disabled={isSubmitting}
-                                    onClick={() => handleSetCheckerEmployeeDailyStatus(emp, statusOpt)}
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
-                                      isCurrent
-                                        ? statusOpt === 'Active'
-                                          ? 'bg-emerald-600 text-white shadow-xs'
-                                          : statusOpt === 'Break'
-                                            ? 'bg-amber-500 text-white shadow-xs'
-                                            : 'bg-slate-600 text-white shadow-xs'
-                                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                  >
-                                    {statusOpt}
-                                  </button>
-                                );
-                              })}
-                              {st && st.status === 'Active' && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPlanStationName(st.name)}
-                                  className={`ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold transition cursor-pointer ${
-                                    planStationName === st.name
-                                      ? 'bg-persian-600 text-white'
-                                      : 'bg-persian-50 text-persian-700 border border-persian-200 hover:bg-persian-100'
-                                  }`}
-                                >
-                                  {planStationName === st.name ? 'Selected ✓' : 'Plan →'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. External & Station Checkers */}
-                <div className="rounded-xl border border-teal-100 bg-white p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-teal-700">
-                      External / Station Checkers ({checkers.length})
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-500">Click status to update</span>
-                  </div>
-                  {checkers.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic py-2">
-                      No external checkers or stations registered yet.
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                      {checkers.map((st) => {
-                        const assignedLabel = getStationAssignedChecker(st);
-                        return (
-                          <div
-                            key={st.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/70 px-2.5 py-1.5"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-800 truncate">{st.name}</div>
-                              <div className="text-[10px] text-slate-500 font-medium truncate">
-                                {assignedLabel}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
-                                const isCurrent = st.status === statusOpt;
-                                return (
-                                  <button
-                                    key={statusOpt}
-                                    type="button"
-                                    disabled={isSubmitting}
-                                    onClick={() => handleSetExternalCheckerStatus(st, statusOpt)}
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
-                                      isCurrent
-                                        ? statusOpt === 'Active'
-                                          ? 'bg-emerald-600 text-white shadow-xs'
-                                          : statusOpt === 'Break'
-                                            ? 'bg-amber-500 text-white shadow-xs'
-                                            : 'bg-slate-600 text-white shadow-xs'
-                                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                  >
-                                    {statusOpt}
-                                  </button>
-                                );
-                              })}
-                              {st.status !== 'Offline' && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPlanStationName(st.name)}
-                                  className={`ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold transition cursor-pointer ${
-                                    planStationName === st.name
-                                      ? 'bg-persian-600 text-white'
-                                      : 'bg-persian-50 text-persian-700 border border-persian-200 hover:bg-persian-100'
-                                  }`}
-                                >
-                                  {planStationName === st.name ? 'Selected ✓' : 'Plan →'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-2.5">
               <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                 <PlusCircle className="w-4 h-4 text-persian-500" />
-                Assign Checker &amp; Timeline Block
+                Assign Checker Slot &amp; Timeline Block
               </h3>
-              <span className="text-[11px] text-rose-500 font-semibold">
-                * Connected to Checker Employees, External Checkers, Company CRUD &amp; Style Master
+              <span className="text-[11px] text-slate-500 font-semibold">
+                Direct assign to any of {checkerSlots.length} Checker Slots • Staff selection optional
               </span>
             </div>
 
@@ -2584,7 +2578,7 @@ export function QualityManagement({
                     htmlFor={`${uid}-sched-station`}
                     className="block text-[10px] font-bold text-slate-600 mb-1"
                   >
-                    Checker (Employee / External) *
+                    Checker Slot (01 – 12) *
                   </label>
                   <select
                     id={`${uid}-sched-station`}
@@ -2593,11 +2587,12 @@ export function QualityManagement({
                     required
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-bold text-persian-800 outline-none focus:border-persian-500"
                   >
-                    {checkers.map((st) => {
+                    {checkerSlots.map((st) => {
                       const stEmp = getStationAssignedChecker(st);
                       return (
                         <option key={st.id} value={st.name}>
-                          [{st.status}] {st.name} — {stEmp || st.name}
+                          {st.name}
+                          {stEmp ? ` — ${stEmp}` : ''}
                         </option>
                       );
                     })}
@@ -2684,32 +2679,7 @@ export function QualityManagement({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end pt-1">
-                <div>
-                  <label
-                    htmlFor={`${uid}-sched-part`}
-                    className="block text-[10px] font-bold text-slate-600 mb-1"
-                  >
-                    Part / Operation
-                  </label>
-                  <select
-                    id={`${uid}-sched-part`}
-                    value={planPartName}
-                    onChange={(e) => setPlanPartName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-semibold outline-none focus:border-persian-500"
-                  >
-                    {!selectedPlanStyle || selectedPlanStyle.parts.length === 0 ? (
-                      <option value="Final QC">Final QC</option>
-                    ) : (
-                      selectedPlanStyle.parts.map((p, idx) => (
-                        <option key={`${p.name}-${idx}`} value={p.name}>
-                          {p.name}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 items-end pt-1">
                 <div>
                   <label
                     htmlFor={`${uid}-sched-start`}
@@ -2778,27 +2748,20 @@ export function QualityManagement({
                 <div>
                   <label
                     htmlFor={`${uid}-sched-checker-emp`}
-                    className={`block text-[10px] font-bold mb-1 ${
-                      !planCheckerEmp ? 'text-rose-700' : 'text-slate-600'
-                    }`}
+                    className="block text-[10px] font-bold text-slate-600 mb-1"
                   >
-                    Checker (From Staff) *
+                    Checker Staff (Optional)
                   </label>
                   <select
                     id={`${uid}-sched-checker-emp`}
                     value={planCheckerEmp}
                     onChange={(e) => setPlanCheckerEmp(e.target.value)}
-                    required
-                    className={`w-full rounded-lg p-2 text-xs font-bold outline-none ${
-                      !planCheckerEmp
-                        ? 'bg-rose-50 border-2 border-rose-400 text-rose-800'
-                        : 'bg-slate-50 border border-slate-300 text-slate-800'
-                    }`}
+                    className="w-full rounded-lg p-2 text-xs font-semibold outline-none bg-slate-50 border border-slate-300 text-slate-800 focus:border-persian-500"
                   >
-                    <option value="">-- ⚠️ Assign Checker --</option>
+                    <option value="">-- Optional: Assign Staff --</option>
                     {activeEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
-                      const targetSt = checkers.find((c) => c.name === planStationName);
+                      const targetSt = checkerSlots.find((c) => c.name === planStationName);
                       const usedInOtherStation = findStationWithEmployee(
                         label,
                         targetSt?.id,
@@ -2880,9 +2843,9 @@ export function QualityManagement({
                 {/* Matrix Header */}
                 <div className="flex border-b border-slate-200 bg-slate-50 font-semibold text-xs text-slate-600">
                   <div className="w-72 sm:w-80 p-3 flex items-center justify-between bg-slate-100 border-r border-slate-300 font-bold text-persian-800 uppercase tracking-wider shrink-0">
-                    <span>Checker &amp; Staff ({checkers.length})</span>
+                    <span>Checker Slots ({checkerSlots.length})</span>
                     <span className="text-[10px] bg-white px-2 py-0.5 rounded border border-slate-300 font-normal text-slate-500">
-                      1 Staff / Station
+                      Optional Staff
                     </span>
                   </div>
                   <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200">
@@ -2902,7 +2865,7 @@ export function QualityManagement({
 
                 {/* Checker Rows */}
                 <div className="divide-y divide-slate-200">
-                  {checkers.map((st) => {
+                  {checkerSlots.map((st) => {
                     const stBlocks = activeDateShiftBlocks.filter(
                       (b) => b.stationId === st.id || b.stationName === st.name
                     );
@@ -2921,7 +2884,7 @@ export function QualityManagement({
                           isDropTarget ? 'bg-indigo-50/60' : 'hover:bg-slate-50/80'
                         }`}
                       >
-                        {/* Left Column: Checker Station + Direct Employee Assignment Dropdown */}
+                        {/* Left Column: Checker Slot + Optional Staff Dropdown */}
                         <div className="w-72 sm:w-80 p-3 bg-white border-r border-slate-300 flex flex-col justify-between shrink-0 gap-2">
                           <div className="flex items-center justify-between">
                             <span className="font-black text-persian-800 text-xs sm:text-sm">
@@ -2929,30 +2892,24 @@ export function QualityManagement({
                             </span>
                             <span
                               className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                                !hasValidEmp
-                                  ? 'bg-rose-100 text-rose-800 border-rose-300'
-                                  : st.status === 'Active'
+                                hasValidEmp
                                   ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : 'bg-amber-100 text-amber-800 border-amber-300'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200'
                               }`}
                             >
-                              {!hasValidEmp ? '⚠️ Assign Checker' : st.status}
+                              {hasValidEmp ? 'Staff Assigned' : 'Slot Ready'}
                             </span>
                           </div>
 
-                          {/* Direct Employee Selector for this Checker Station */}
+                          {/* Optional Staff Selector for this Checker Slot */}
                           <div>
                             <select
-                              aria-label={`Assign Checker for ${st.name}`}
+                              aria-label={`Assign Staff for ${st.name}`}
                               value={assignedEmp}
                               onChange={(e) => handleQuickAssignStationEmployee(st, e.target.value)}
-                              className={`w-full rounded-lg px-2 py-1.5 text-[11px] font-bold outline-none cursor-pointer border ${
-                                !hasValidEmp
-                                  ? 'bg-rose-50 border-rose-300 text-rose-800'
-                                  : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-persian-500'
-                              }`}
+                              className="w-full rounded-lg px-2 py-1.5 text-[11px] font-semibold outline-none cursor-pointer border bg-slate-50 border-slate-200 text-slate-800 focus:border-persian-500"
                             >
-                              <option value="">-- ⚠️ Assign Checker (Staff) --</option>
+                              <option value="">-- Optional: Assign Staff --</option>
                               {activeEmployees.map((emp) => {
                                 const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
                                 const usedInOtherStation = findStationWithEmployee(
@@ -3110,7 +3067,7 @@ export function QualityManagement({
 
                                 <div className="font-extrabold text-slate-800 text-[11px] truncate mb-1">
                                   {b.styleCode ? `${b.styleCode} — ` : ''}
-                                  {b.styleName} ({b.size}) • {b.partName}
+                                  {b.styleName} ({b.size})
                                 </div>
 
                                 <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
@@ -3221,6 +3178,437 @@ export function QualityManagement({
       )}
 
       {/* =====================================================================
+          TAB 1B: DAILY STYLE-WISE DELIVERY PLAN TABLE (PRINTABLE MATRIX)
+          ===================================================================== */}
+      {subTab === 'deliveryPlan' && (
+        <div className="space-y-4">
+          <style>{`@media print { @page { size: A4 landscape; margin: 10mm; } }`}</style>
+
+          {/* Interactive Toolbar (Hidden on Print) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-soft space-y-3 print:hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">
+                    Daily Style-Wise Delivery Plan Matrix
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Style ekata dawasin dawasa Delivery Qty enter karanna • Today Delivery Qty automatically sync wenawa
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="bg-persian-800 hover:bg-persian-600 text-white px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-sm transition cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-amber-300" />
+                  <span>Print Delivery Plan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Date Range, Filters & Quick Navigation */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-2.5 pt-2 border-t border-slate-100 items-center">
+              <div className="xl:col-span-4 flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDeliveryPlanStartDate((prev) => addDaysIso(prev || todayStr, -deliveryPlanDays))
+                  }
+                  title="Previous Period"
+                  className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+                  <label
+                    htmlFor={`${uid}-deliv-start`}
+                    className="text-[11px] font-bold text-slate-600"
+                  >
+                    From:
+                  </label>
+                  <input
+                    id={`${uid}-deliv-start`}
+                    type="date"
+                    value={deliveryPlanStartDate}
+                    onChange={(e) => setDeliveryPlanStartDate(e.target.value || todayStr)}
+                    className="bg-transparent text-xs font-bold font-mono text-persian-800 outline-none cursor-pointer"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDeliveryPlanStartDate((prev) => addDaysIso(prev || todayStr, deliveryPlanDays))
+                  }
+                  title="Next Period"
+                  className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeliveryPlanStartDate(todayStr)}
+                  className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-[11px] font-bold cursor-pointer"
+                >
+                  Today
+                </button>
+              </div>
+
+              <div className="xl:col-span-2 flex items-center gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+                {([7, 10, 14] as const).map((daysOpt) => (
+                  <button
+                    key={daysOpt}
+                    type="button"
+                    onClick={() => setDeliveryPlanDays(daysOpt)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-extrabold transition cursor-pointer ${
+                      deliveryPlanDays === daysOpt
+                        ? 'bg-white text-persian-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {daysOpt} Days
+                  </button>
+                ))}
+              </div>
+
+              <div className="xl:col-span-2">
+                <select
+                  aria-label="Filter by Company"
+                  value={deliveryPlanCompanyFilter}
+                  onChange={(e) => setDeliveryPlanCompanyFilter(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold outline-none"
+                >
+                  <option value="ALL">All Companies</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="xl:col-span-2 relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search style..."
+                  value={deliveryPlanSearch}
+                  onChange={(e) => setDeliveryPlanSearch(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold outline-none"
+                />
+              </div>
+
+              <div className="xl:col-span-2 flex items-center justify-end">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={deliveryPlanIncludeDone}
+                    onChange={(e) => setDeliveryPlanIncludeDone(e.target.checked)}
+                    className="rounded border-slate-300 text-persian-600 focus:ring-persian-500 cursor-pointer"
+                  />
+                  <span>Include Done Styles</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-amber-50/70 border border-amber-200 rounded-xl px-3 py-2 text-[11px] font-semibold text-amber-900">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>
+                  Rule: Dawase <strong>Delivery Qty</strong> eka e dawase <strong>Checking Plan Qty</strong> ekata wada wadi wenna one — adu ho samana unoth confirmation alert ekak enawa.
+                </span>
+              </div>
+              <span className="font-mono text-[10px] text-amber-800">
+                Type qty &amp; press Enter / click outside to save
+              </span>
+            </div>
+          </div>
+
+          {/* Printable Delivery Plan Sheet */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-soft overflow-hidden print:border-none print:shadow-none print:rounded-none">
+            {/* Print-Only Header */}
+            <div className="hidden print:flex items-end justify-between border-b-2 border-slate-900 pb-3 mb-4">
+              <div>
+                <h1 className="text-lg font-black uppercase tracking-wide text-slate-900">
+                  Dinusha Embroidery (Pvt) Ltd — Daily Style-Wise Delivery Plan
+                </h1>
+                <p className="text-xs font-semibold text-slate-600">
+                  Weliweriya Factory • Quality Checking &amp; Dispatch Schedule
+                  {deliveryPlanCompanyFilter !== 'ALL' ? ` • Client: ${deliveryPlanCompanyFilter}` : ''}
+                </p>
+              </div>
+              <div className="text-right text-xs font-mono text-slate-700">
+                <div className="font-bold">
+                  Period: {deliveryPlanDates[0]} to {deliveryPlanDates[deliveryPlanDates.length - 1]}
+                </div>
+                <div>Printed: {todayStr}</div>
+              </div>
+            </div>
+
+            {filteredDeliveryPlanRows.length === 0 ? (
+              <div className="p-10 text-center text-xs text-slate-400">
+                No styles match the current filter. Register styles in Production Management → Style Master.
+              </div>
+            ) : (
+              <div className="overflow-x-auto print:overflow-visible">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 border-b-2 border-slate-300 print:bg-slate-100">
+                      <th
+                        scope="col"
+                        className="p-3 font-extrabold uppercase tracking-wider sticky left-0 z-20 bg-slate-100 border-r-2 border-slate-300 min-w-[230px] print:static print:min-w-[180px]"
+                      >
+                        Style Name &amp; Order Qty
+                      </th>
+                      {deliveryPlanDates.map((dStr) => {
+                        const meta = formatShortDateMeta(dStr);
+                        const isToday = dStr === todayStr;
+                        const isViewing = dStr === planDate;
+                        return (
+                          <th
+                            key={dStr}
+                            scope="col"
+                            className={`p-2 text-center font-extrabold border-r border-slate-200 min-w-[96px] print:min-w-0 print:p-1.5 ${
+                              isToday
+                                ? 'bg-indigo-100/90 text-indigo-950'
+                                : isViewing
+                                ? 'bg-persian-50 text-persian-900'
+                                : ''
+                            }`}
+                          >
+                            <div className="text-[10px] uppercase tracking-wider opacity-75">
+                              {meta.weekday}
+                            </div>
+                            <div className="text-xs font-black">{meta.dayMonth}</div>
+                            <div className="text-[9px] font-mono font-semibold text-slate-500 print:hidden">
+                              {dStr}
+                            </div>
+                            {isToday && (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-indigo-600 text-white text-[9px] font-black uppercase print:bg-transparent print:text-slate-900 print:border print:border-slate-900">
+                                Today
+                              </span>
+                            )}
+                          </th>
+                        );
+                      })}
+                      <th
+                        scope="col"
+                        className="p-2.5 text-right font-extrabold uppercase tracking-wider bg-slate-100 border-l-2 border-slate-300 min-w-[110px] print:min-w-[80px]"
+                      >
+                        Range Total
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-200">
+                    {filteredDeliveryPlanRows.map((row) => {
+                      const { style, orderQty } = row;
+                      const cStyle = getCompanyColor(style.company);
+                      const rangeTotal = deliveryPlanDates.reduce(
+                        (sum, dStr) => sum + getDeliveryTargetForStyle(style, dStr),
+                        0
+                      );
+                      const allDatesTotal = getStyleTotalDeliveryPlanned(style);
+
+                      return (
+                        <tr key={style.id} className="hover:bg-slate-50/70">
+                          {/* Column 1: Style Name */}
+                          <th
+                            scope="row"
+                            className="p-3 sticky left-0 z-10 bg-white border-r-2 border-slate-300 align-middle print:static print:p-2"
+                          >
+                            <div className="flex items-center justify-between gap-1.5 mb-0.5">
+                              <span
+                                className={`inline-block text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.2 rounded border print:border-slate-400 print:text-slate-800 print:bg-transparent ${cStyle.badge}`}
+                              >
+                                {style.company}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-slate-500">
+                                Order: {orderQty.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="font-extrabold text-slate-900 text-xs leading-snug">
+                              {style.code ? `${style.code} — ` : ''}
+                              {style.name}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono mt-0.5 print:hidden">
+                              All Planned: <strong className="text-indigo-700">{allDatesTotal.toLocaleString()}</strong> / {orderQty.toLocaleString()}
+                            </div>
+                          </th>
+
+                          {/* Date Columns */}
+                          {deliveryPlanDates.map((dStr) => {
+                            const draftKey = `${style.id}::${dStr}`;
+                            const savedVal = getDeliveryTargetForStyle(style, dStr);
+                            const dayPlanQty = getStyleDatePlanQty(style, dStr);
+                            const displayInputVal =
+                              draftKey in deliveryDraftMap
+                                ? deliveryDraftMap[draftKey]
+                                : savedVal > 0
+                                ? String(savedVal)
+                                : '';
+                            const isToday = dStr === todayStr;
+                            const isSavingThis = savingDeliveryCellKey === draftKey;
+                            const violatesRule = dayPlanQty > 0 && savedVal <= dayPlanQty;
+
+                            return (
+                              <td
+                                key={dStr}
+                                className={`p-1.5 border-r border-slate-200 text-center align-middle print:p-1.5 ${
+                                  isToday ? 'bg-indigo-50/40 print:bg-slate-50' : ''
+                                }`}
+                              >
+                                {/* Interactive Input (Screen Only) */}
+                                <div className="print:hidden flex flex-col items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={orderQty || 500000}
+                                    placeholder="0"
+                                    aria-label={`Delivery Qty for ${style.name} on ${dStr}`}
+                                    value={displayInputVal}
+                                    disabled={isSavingThis}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    onChange={(e) =>
+                                      setDeliveryDraftMap((prev) => ({
+                                        ...prev,
+                                        [draftKey]: e.target.value,
+                                      }))
+                                    }
+                                    onBlur={() => commitDeliveryPlanCell(style, dStr)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.currentTarget.blur();
+                                      } else if (e.key === 'Escape') {
+                                        clearDeliveryDraftKey(draftKey);
+                                        e.currentTarget.blur();
+                                      }
+                                    }}
+                                    className={`w-20 text-center font-mono font-extrabold text-xs rounded-lg px-1.5 py-1.5 border outline-none transition ${
+                                      isSavingThis
+                                        ? 'bg-slate-100 border-slate-300 text-slate-400'
+                                        : violatesRule
+                                        ? 'bg-rose-50 border-rose-400 text-rose-900 focus:border-rose-600'
+                                        : savedVal > 0
+                                        ? 'bg-indigo-50/80 border-indigo-300 text-indigo-900 focus:border-persian-600'
+                                        : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 focus:border-persian-500'
+                                    }`}
+                                  />
+                                  {dayPlanQty > 0 && (
+                                    <span
+                                      className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                                        violatesRule
+                                          ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      }`}
+                                      title={`Checking Plan Qty on ${dStr}: ${dayPlanQty} Pcs`}
+                                    >
+                                      Plan: {dayPlanQty}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Crisp Print Value */}
+                                <span className="hidden print:inline font-mono font-bold text-slate-900">
+                                  {savedVal > 0 ? savedVal.toLocaleString() : '—'}
+                                </span>
+                              </td>
+                            );
+                          })}
+
+                          {/* Row Total Column */}
+                          <td className="p-2.5 text-right border-l-2 border-slate-300 bg-slate-50/70 align-middle font-mono print:bg-transparent print:p-2">
+                            <div className="font-black text-persian-900 text-xs">
+                              {rangeTotal.toLocaleString()}
+                            </div>
+                            <div
+                              className={`text-[9px] font-bold print:hidden ${
+                                orderQty > 0 && allDatesTotal > orderQty
+                                  ? 'text-rose-600'
+                                  : 'text-slate-500'
+                              }`}
+                            >
+                              {orderQty > 0
+                                ? `${Math.round((allDatesTotal / orderQty) * 100)}% of Order`
+                                : '—'}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
+                  <tfoot>
+                    <tr className="bg-persian-900 text-white font-extrabold border-t-2 border-slate-400 print:bg-slate-200 print:text-slate-900">
+                      <th
+                        scope="row"
+                        className="p-3 text-left uppercase tracking-wider sticky left-0 z-10 bg-persian-900 border-r-2 border-persian-700 print:static print:bg-slate-200 print:border-slate-400"
+                      >
+                        Daily Total ({filteredDeliveryPlanRows.length} Styles)
+                      </th>
+                      {deliveryPlanDates.map((dStr) => {
+                        const colTotal = filteredDeliveryPlanRows.reduce(
+                          (sum, row) => sum + getDeliveryTargetForStyle(row.style, dStr),
+                          0
+                        );
+                        return (
+                          <td
+                            key={dStr}
+                            className="p-2.5 text-center font-mono font-black border-r border-persian-700/60 print:border-slate-300"
+                          >
+                            {colTotal > 0 ? colTotal.toLocaleString() : '0'}
+                          </td>
+                        );
+                      })}
+                      <td className="p-2.5 text-right font-mono font-black border-l-2 border-persian-700 print:border-slate-400">
+                        {filteredDeliveryPlanRows
+                          .reduce(
+                            (grand, row) =>
+                              grand +
+                              deliveryPlanDates.reduce(
+                                (s, dStr) => s + getDeliveryTargetForStyle(row.style, dStr),
+                                0
+                              ),
+                            0
+                          )
+                          .toLocaleString()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+
+            {/* Print-Only Signatures Footer */}
+            <div className="hidden print:grid grid-cols-3 gap-12 mt-12 pt-6 px-2 text-xs text-slate-800">
+              <div className="text-center">
+                <div className="border-t border-slate-700 pt-1.5 font-bold">
+                  Prepared By (QC Supervisor)
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="border-t border-slate-700 pt-1.5 font-bold">
+                  Checked By (Production Manager)
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="border-t border-slate-700 pt-1.5 font-bold">
+                  Approved By (Director)
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
           TAB 2: LIVE FLOOR DISPLAY (READ-ONLY) — FULL-SCREEN 8-CHECKER VIEW
           ===================================================================== */}
       {subTab === 'floorDisplay' && (
@@ -3238,7 +3626,7 @@ export function QualityManagement({
               <Monitor className="w-4 h-4 text-amber-300 shrink-0" />
               <div className="min-w-0">
                 <h3 className="text-xs sm:text-sm font-extrabold uppercase tracking-wide truncate">
-                  Floor Checking Monitoring Dashboard ({checkers.length} Checkers)
+                  Floor Checking Monitoring Dashboard ({checkerSlots.length} Checker Slots)
                 </h3>
                 <p className="text-[10px] text-blue-200 truncate">
                   Live Read-Only QC Floor Display synced with Daily Checking Plan &amp; Delivery Targets
@@ -3338,9 +3726,9 @@ export function QualityManagement({
             {/* Compact Timeline Hours Header */}
             <div className="shrink-0 flex border-b border-slate-200 bg-slate-50 font-semibold text-[11px] text-slate-600">
               <div className="w-64 sm:w-72 px-2.5 py-1 flex items-center justify-between bg-slate-100 border-r border-slate-300 font-bold text-persian-800 uppercase tracking-wider shrink-0">
-                <span>Checker ({checkers.length})</span>
+                <span>Checker Slots ({checkerSlots.length})</span>
                 <span className="text-[9px] bg-white px-1.5 py-0.5 rounded border border-slate-300 font-normal text-slate-500">
-                  {checkers.length} Staff
+                  12 Slots
                 </span>
               </div>
               <div className="flex-1 grid grid-cols-11 text-center divide-x divide-slate-200">
@@ -3356,14 +3744,14 @@ export function QualityManagement({
               </div>
             </div>
 
-            {/* Checker Rows Grid — Equal Fractional Height so All Checkers Fit on One Screen */}
+            {/* Checker Rows Grid — Equal Fractional Height so All 12 Slots Fit on One Screen */}
             <div
               className="flex-1 min-h-0 grid divide-y divide-slate-200"
               style={{
-                gridTemplateRows: `repeat(${Math.max(1, checkers.length)}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${Math.max(1, checkerSlots.length)}, minmax(0, 1fr))`,
               }}
             >
-              {checkers.map((st) => {
+              {checkerSlots.map((st) => {
                 const stBlocks = activeDateShiftBlocks.filter(
                   (b) => b.stationId === st.id || b.stationName === st.name
                 );
@@ -3391,14 +3779,12 @@ export function QualityManagement({
                           </span>
                           <span
                             className={`text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none shrink-0 ${
-                              !hasValidEmp
-                                ? 'bg-rose-100 text-rose-800 border-rose-300'
-                                : st.status === 'Active'
+                              hasValidEmp
                                 ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                : 'bg-amber-100 text-amber-800 border-amber-300'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
                             }`}
                           >
-                            {!hasValidEmp ? '⚠️ Assign Checker' : st.status}
+                            {hasValidEmp ? 'Assigned' : 'Ready'}
                           </span>
                         </div>
                         <span className="text-[10px] font-mono font-semibold text-slate-500 shrink-0">
@@ -3428,9 +3814,8 @@ export function QualityManagement({
                             <span className="truncate">{assignedEmp}</span>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-1 bg-rose-50 border border-rose-300 px-1.5 py-0.5 rounded text-rose-800 font-extrabold shrink-0">
-                            <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
-                            <span>Assign Checker</span>
+                          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-500 font-semibold shrink-0">
+                            <span>Open Slot</span>
                           </div>
                         )}
 
@@ -3634,269 +4019,147 @@ export function QualityManagement({
       )}
 
       {/* =====================================================================
-          TAB 4: CHECKERS & STATIONS CRUD (EXTERNAL + INTERNAL EMPLOYEES)
+          TAB 4: 12 CHECKER SLOTS & INTERNAL CHECKER EMPLOYEES
           ===================================================================== */}
       {subTab === 'checkerCrud' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:hidden">
-          <div className="bg-white p-6 rounded-2xl shadow-xs border border-slate-200 h-fit">
-            <h3 className="font-extrabold mb-1.5 text-sm uppercase text-slate-600 flex items-center gap-2">
-              <Users className="w-4 h-4 text-persian-500" />
-              {editingStationId ? 'Edit External Checker' : 'Add External Checker'}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:hidden">
+          <div className="bg-white p-6 rounded-2xl shadow-xs border border-slate-200">
+            <h3
+              id={`${uid}-slot-table-caption`}
+              className="font-extrabold mb-3 text-sm uppercase text-slate-700 flex items-center justify-between"
+            >
+              <span className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-persian-500" />
+                Checker Slots ({checkerSlots.length})
+              </span>
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 normal-case">
+                Optional Staff Assignment
+              </span>
             </h3>
-            <p className="text-[11px] text-slate-500 mb-4">
-              Pitin ena (visiting / external) checker kenek innawanam methanata name eka witharak
-              add karanna.
+            <p className="text-[11px] text-slate-500 mb-3">
+              Checker 01 sita Checker 12 dakwa slots 12 Checking Matrix ekata kelinma assign karanna puluwan. Awashya nam staff kenek select karala thiyanna.
             </p>
-            <form onSubmit={handleStationSubmit} className="space-y-4">
-              <div>
-                <label
-                  htmlFor={`${uid}-station-name`}
-                  className="block text-xs font-bold text-slate-700 mb-1"
-                >
-                  External Checker / Station Name *
-                </label>
-                <input
-                  id={`${uid}-station-name`}
-                  type="text"
-                  value={stationNameInput}
-                  onChange={(e) => setStationNameInput(e.target.value)}
-                  placeholder="e.g. Visiting Checker 01"
-                  maxLength={60}
-                  required
-                  className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm focus:border-persian-500 outline-none"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor={`${uid}-station-status`}
-                  className="block text-xs font-bold text-slate-700 mb-1"
-                >
-                  Operational Status *
-                </label>
-                <select
-                  id={`${uid}-station-status`}
-                  value={stationStatusInput}
-                  onChange={(e) =>
-                    setStationStatusInput(e.target.value as CheckerOperationalStatus)
-                  }
-                  className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm focus:border-persian-500 outline-none cursor-pointer"
-                >
-                  <option value="Active">Active (Working)</option>
-                  <option value="Break">Break</option>
-                  <option value="Offline">Offline</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 bg-persian-900 text-white font-bold p-3 rounded-lg text-sm hover:bg-persian-800 shadow-md transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {editingStationId ? 'Update Checker' : 'Save External Checker'}
-                </button>
-                {editingStationId && (
-                  <button
-                    type="button"
-                    onClick={resetStationForm}
-                    className="bg-slate-200 text-slate-700 font-bold px-4 py-3 rounded-lg text-sm transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-xs border border-slate-200 lg:col-span-2 space-y-6">
-            <div>
-              <h3
-                id={`${uid}-employee-checkers-caption`}
-                className="font-extrabold mb-3 text-sm uppercase text-slate-600 flex items-center justify-between"
-              >
-                <span>Our Checker Employees ({checkerEmployees.length})</span>
-                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 normal-case">
-                  Synced from Employees
-                </span>
-              </h3>
-              <div
-                tabIndex={0}
-                role="region"
-                aria-labelledby={`${uid}-employee-checkers-caption`}
-                className="table-region rounded-xl border border-slate-200"
-              >
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
-                    <tr>
-                      <th className="p-3.5">Checker Employee</th>
-                      <th className="p-3.5">Role</th>
-                      <th className="p-3.5">Assigned Station</th>
-                      <th className="p-3.5">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {checkerEmployees.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="p-4 text-xs text-slate-500 text-center">
-                          Employees list eke &quot;Checker&quot; / &quot;Final quality Checker&quot;
-                          role ekak thiyana staff kenek thama na.
+            <div
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${uid}-slot-table-caption`}
+              className="table-region rounded-xl border border-slate-200"
+            >
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-3">Slot</th>
+                    <th className="p-3">Assigned Staff (Optional)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {checkerSlots.map((st) => {
+                    const assignedEmp = getStationAssignedChecker(st);
+                    return (
+                      <tr key={st.id} className="hover:bg-slate-50">
+                        <th scope="row" className="p-3 font-extrabold text-persian-800 bg-white">
+                          {st.name}
+                        </th>
+                        <td className="p-3">
+                          <select
+                            aria-label={`Assign staff for ${st.name}`}
+                            value={assignedEmp}
+                            onChange={(e) => handleQuickAssignStationEmployee(st, e.target.value)}
+                            className="w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none cursor-pointer border bg-slate-50 border-slate-200 text-slate-800 focus:border-persian-500"
+                          >
+                            <option value="">-- Open Slot (No Staff) --</option>
+                            {activeEmployees.map((emp) => {
+                              const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
+                              const usedInOtherStation = findStationWithEmployee(
+                                label,
+                                st.id,
+                                st.name
+                              );
+                              return (
+                                <option
+                                  key={emp.id}
+                                  value={label}
+                                  disabled={Boolean(usedInOtherStation)}
+                                >
+                                  {label}
+                                  {usedInOtherStation ? ` (In ${usedInOtherStation.name})` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
                         </td>
                       </tr>
-                    ) : (
-                      checkerEmployees.map((emp) => {
-                        const assignedStation = getEmployeeCheckerStation(emp);
-                        const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
-                        const currentStatus: CheckerOperationalStatus = assignedStation
-                          ? assignedStation.status
-                          : 'Offline';
-                        return (
-                          <tr key={emp.id} className="hover:bg-slate-50">
-                            <th scope="row" className="p-3.5 font-bold text-slate-800 bg-white">
-                              <div className="flex items-center gap-2">
-                                <span>{empLabel}</span>
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  Staff
-                                </span>
-                              </div>
-                            </th>
-                            <td className="p-3.5 text-xs text-slate-600 font-medium">
-                              {emp.role}
-                            </td>
-                            <td className="p-3.5 text-xs">
-                              {assignedStation ? (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  {assignedStation.name}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">Click Active to Assign</span>
-                              )}
-                            </td>
-                            <td className="p-3.5">
-                              <div className="flex items-center gap-1">
-                                {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
-                                  const isCurrent = currentStatus === statusOpt && Boolean(assignedStation);
-                                  return (
-                                    <button
-                                      key={statusOpt}
-                                      type="button"
-                                      disabled={isSubmitting}
-                                      onClick={() => handleSetCheckerEmployeeDailyStatus(emp, statusOpt)}
-                                      className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
-                                        isCurrent
-                                          ? statusOpt === 'Active'
-                                            ? 'bg-emerald-600 text-white'
-                                            : statusOpt === 'Break'
-                                              ? 'bg-amber-500 text-white'
-                                              : 'bg-slate-600 text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                      }`}
-                                    >
-                                      {statusOpt}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <div>
-              <h3
-                id={`${uid}-station-table-caption`}
-                className="font-extrabold mb-3 text-sm uppercase text-slate-500 flex items-center justify-between"
-              >
-                <span>External / Station Checkers ({checkers.length})</span>
-                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 normal-case">
-                  External &amp; Floor Stations
-                </span>
-              </h3>
-              <div
-                tabIndex={0}
-                role="region"
-                aria-labelledby={`${uid}-station-table-caption`}
-                className="table-region rounded-xl border border-slate-200"
-              >
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
+          <div className="bg-white p-6 rounded-2xl shadow-xs border border-slate-200 h-fit">
+            <h3
+              id={`${uid}-employee-checkers-caption`}
+              className="font-extrabold mb-3 text-sm uppercase text-slate-600 flex items-center justify-between"
+            >
+              <span>Our Checker Employees ({checkerEmployees.length})</span>
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 normal-case">
+                Synced from Employees
+              </span>
+            </h3>
+            <div
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${uid}-employee-checkers-caption`}
+              className="table-region rounded-xl border border-slate-200"
+            >
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase font-bold border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-3.5">Checker Employee</th>
+                    <th className="p-3.5">Role</th>
+                    <th className="p-3.5">Assigned Slot</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {checkerEmployees.length === 0 ? (
                     <tr>
-                      <th className="p-3.5">Checker / Station Name</th>
-                      <th className="p-3.5">Assigned Staff</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5 text-center">Actions</th>
+                      <td colSpan={3} className="p-4 text-xs text-slate-500 text-center">
+                        Employees list eke &quot;Checker&quot; / &quot;Final quality Checker&quot;
+                        role ekak thiyana staff kenek thama na.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {checkers.map((st) => {
-                      const assignedEmp = getStationAssignedChecker(st);
+                  ) : (
+                    checkerEmployees.map((emp) => {
+                      const assignedStation = getEmployeeCheckerStation(emp);
+                      const empLabel = `EPF #${emp.epfNo} - ${emp.fullName}`;
                       return (
-                        <tr key={st.id} className="hover:bg-slate-50">
+                        <tr key={emp.id} className="hover:bg-slate-50">
                           <th scope="row" className="p-3.5 font-bold text-slate-800 bg-white">
-                            {st.name}
-                          </th>
-                          <td className="p-3.5 text-xs text-slate-600">
-                            {assignedEmp ? (
-                              <span className="font-semibold text-slate-700">{assignedEmp}</span>
-                            ) : (
-                              <span className="text-slate-400">External / Unassigned</span>
-                            )}
-                          </td>
-                          <td className="p-3.5">
-                            <div className="flex items-center gap-1">
-                              {(['Active', 'Break', 'Offline'] as CheckerOperationalStatus[]).map((statusOpt) => {
-                                const isCurrent = st.status === statusOpt;
-                                return (
-                                  <button
-                                    key={statusOpt}
-                                    type="button"
-                                    disabled={isSubmitting}
-                                    onClick={() => handleSetExternalCheckerStatus(st, statusOpt)}
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
-                                      isCurrent
-                                        ? statusOpt === 'Active'
-                                          ? 'bg-emerald-600 text-white'
-                                          : statusOpt === 'Break'
-                                            ? 'bg-amber-500 text-white'
-                                            : 'bg-slate-600 text-white'
-                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
-                                  >
-                                    {statusOpt}
-                                  </button>
-                                );
-                              })}
+                            <div className="flex items-center gap-2">
+                              <span>{empLabel}</span>
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                Staff
+                              </span>
                             </div>
+                          </th>
+                          <td className="p-3.5 text-xs text-slate-600 font-medium">
+                            {emp.role}
                           </td>
-                          <td className="p-3.5 text-center space-x-2">
-                            <button
-                              type="button"
-                              onClick={() => handleEditStation(st)}
-                              aria-label={`Edit ${st.name}`}
-                              className="text-slate-500 hover:text-persian-600 p-1 cursor-pointer"
-                            >
-                              <Pencil className="w-4 h-4 inline" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteStation(st)}
-                              aria-label={`Delete ${st.name}`}
-                              className="text-slate-500 hover:text-rose-600 p-1 cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4 inline" />
-                            </button>
+                          <td className="p-3.5 text-xs">
+                            {assignedStation ? (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {assignedStation.name}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">Unassigned</span>
+                            )}
                           </td>
                         </tr>
                       );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -3968,7 +4231,7 @@ export function QualityManagement({
                     htmlFor={`${uid}-modal-station`}
                     className="block text-[10px] font-bold text-slate-600 mb-1"
                   >
-                    Target Checker Station *
+                    Target Checker Slot *
                   </label>
                   <select
                     id={`${uid}-modal-station`}
@@ -3976,16 +4239,17 @@ export function QualityManagement({
                     onChange={(e) => {
                       const nextStName = e.target.value;
                       setModalStationName(nextStName);
-                      const nextSt = checkers.find((c) => c.name === nextStName);
+                      const nextSt = checkerSlots.find((c) => c.name === nextStName);
                       setModalCheckerEmp(getStationAssignedChecker(nextSt));
                     }}
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-bold text-persian-800"
                   >
-                    {checkers.map((c) => {
+                    {checkerSlots.map((c) => {
                       const cEmp = getStationAssignedChecker(c);
                       return (
                         <option key={c.id} value={c.name}>
-                          {c.name} — {cEmp || '⚠️ Assign Checker'}
+                          {c.name}
+                          {cEmp ? ` — ${cEmp}` : ''}
                         </option>
                       );
                     })}
@@ -4137,27 +4401,20 @@ export function QualityManagement({
                 <div>
                   <label
                     htmlFor={`${uid}-modal-checker`}
-                    className={`block text-[10px] font-bold mb-1 ${
-                      !modalCheckerEmp ? 'text-rose-700' : 'text-slate-600'
-                    }`}
+                    className="block text-[10px] font-bold text-slate-600 mb-1"
                   >
-                    Assigned Checker (Staff) *
+                    Assigned Checker (Optional)
                   </label>
                   <select
                     id={`${uid}-modal-checker`}
                     value={modalCheckerEmp}
                     onChange={(e) => setModalCheckerEmp(e.target.value)}
-                    required
-                    className={`w-full rounded-lg p-2 text-xs font-bold outline-none ${
-                      !modalCheckerEmp
-                        ? 'bg-rose-50 border-2 border-rose-400 text-rose-800'
-                        : 'bg-slate-50 border border-slate-300 text-slate-800'
-                    }`}
+                    className="w-full rounded-lg p-2 text-xs font-semibold outline-none bg-slate-50 border border-slate-300 text-slate-800"
                   >
-                    <option value="">-- ⚠️ Assign Checker --</option>
+                    <option value="">-- Optional: Assign Staff --</option>
                     {activeEmployees.map((emp) => {
                       const label = `EPF #${emp.epfNo} - ${emp.fullName}`;
-                      const targetSt = checkers.find(
+                      const targetSt = checkerSlots.find(
                         (c) => c.name === (modalStationName || editingBlock.stationName)
                       );
                       const usedInOtherStation = findStationWithEmployee(
@@ -4230,6 +4487,129 @@ export function QualityManagement({
               )}
             </div>
           </form>
+        )}
+      </dialog>
+
+      {/* =====================================================================
+          NATIVE <dialog> ALERT: TODAY DELIVERY QTY MUST EXCEED TODAY PLAN QTY
+          ===================================================================== */}
+      <dialog
+        ref={deliveryAlertDialogRef}
+        aria-labelledby={`${uid}-delivery-alert-title`}
+        onCancel={(e) => {
+          e.preventDefault();
+          closeDeliveryAlertDialog(true);
+        }}
+        className="m-auto rounded-2xl border-2 border-rose-300 shadow-2xl w-full max-w-md p-0 overflow-hidden bg-white text-slate-900"
+      >
+        {pendingDeliveryAlert && (
+          <div>
+            <div className="bg-rose-600 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0" />
+                <div>
+                  <h2 id={`${uid}-delivery-alert-title`} className="font-extrabold text-sm">
+                    Delivery Qty Alert — Confirmation Required
+                  </h2>
+                  <p className="text-[11px] text-rose-100">
+                    {pendingDeliveryAlert.style.code
+                      ? `${pendingDeliveryAlert.style.code} — `
+                      : ''}
+                    {pendingDeliveryAlert.style.name} ({pendingDeliveryAlert.date})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => closeDeliveryAlertDialog(true)}
+                aria-label="Close alert"
+                className="w-7 h-7 rounded-lg bg-rose-700/70 text-rose-100 hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {pendingDeliveryAlert.kind === 'delivery' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3">
+                      <span className="text-[10px] font-bold uppercase text-rose-600 block">
+                        Entered Delivery Qty
+                      </span>
+                      <span className="font-mono font-black text-lg text-rose-800">
+                        {pendingDeliveryAlert.nextDeliveryQty.toLocaleString()} Pcs
+                      </span>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <span className="text-[10px] font-bold uppercase text-amber-700 block">
+                        Day&apos;s Checking Plan Qty
+                      </span>
+                      <span className="font-mono font-black text-lg text-amber-900">
+                        {pendingDeliveryAlert.dayPlanQty.toLocaleString()} Pcs
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs font-semibold text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <strong>Today Delivery Qty ({pendingDeliveryAlert.nextDeliveryQty.toLocaleString()} Pcs)</strong> eka{' '}
+                    <strong>Today Plan Qty ({pendingDeliveryAlert.dayPlanQty.toLocaleString()} Pcs)</strong> ekata wada aniwaaryen wadi wenna one!
+                    <br />
+                    <span className="text-rose-700 font-bold block mt-1.5">
+                      Ehema nathuwa me widihata update karanna oyata sure da?
+                    </span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+                      <span className="text-[10px] font-bold uppercase text-indigo-600 block">
+                        Day&apos;s Delivery Qty
+                      </span>
+                      <span className="font-mono font-black text-lg text-indigo-800">
+                        {pendingDeliveryAlert.dayDeliveryQty.toLocaleString()} Pcs
+                      </span>
+                    </div>
+                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3">
+                      <span className="text-[10px] font-bold uppercase text-rose-600 block">
+                        New Day Plan Total
+                      </span>
+                      <span className="font-mono font-black text-lg text-rose-800">
+                        {pendingDeliveryAlert.newDayPlanTotal.toLocaleString()} Pcs
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs font-semibold text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    Me checking plan eka dammoth <strong>Today Plan Qty ({pendingDeliveryAlert.newDayPlanTotal.toLocaleString()} Pcs)</strong> eka,{' '}
+                    <strong>Today Delivery Qty ({pendingDeliveryAlert.dayDeliveryQty.toLocaleString()} Pcs)</strong> ekata samana ho wadi wenawa!
+                    <br />
+                    <span className="text-rose-700 font-bold block mt-1.5">
+                      Today Delivery Qty eka Today Plan Qty ekata wada wadi wenna one. Digatama schedule karanna oyata sure da?
+                    </span>
+                  </p>
+                </>
+              )}
+
+              <div className="flex items-center gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => closeDeliveryAlertDialog(true)}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs transition cursor-pointer"
+                >
+                  Cancel (No)
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeliveryAlertDialog}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-sm transition cursor-pointer"
+                >
+                  Yes, I&apos;m Sure — Proceed
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </dialog>
     </div>

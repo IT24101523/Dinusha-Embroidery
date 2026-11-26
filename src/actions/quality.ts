@@ -253,6 +253,7 @@ export async function saveCheckerStationAction(
           station_name: nameTrim,
           operational_status: payload.status,
           employee_name: empTrim,
+          is_active: true,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingId)
@@ -262,6 +263,31 @@ export async function saveCheckerStationAction(
       revalidatePath('/');
       return { success: true, checker: mapCheckerStation(data) };
     } else {
+      const { data: existingByName } = await supabaseAdmin
+        .from('quality_checkers')
+        .select('id')
+        .ilike('station_name', nameTrim)
+        .maybeSingle();
+
+      if (existingByName?.id) {
+        const { data, error } = await supabaseAdmin
+          .from('quality_checkers')
+          .update({
+            station_number: parsedNum,
+            station_name: nameTrim,
+            operational_status: payload.status,
+            employee_name: empTrim,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingByName.id)
+          .select('*')
+          .single();
+        if (error) throw new Error(formatSupabaseError(error));
+        revalidatePath('/');
+        return { success: true, checker: mapCheckerStation(data) };
+      }
+
       const { data, error } = await supabaseAdmin
         .from('quality_checkers')
         .insert({
@@ -350,32 +376,35 @@ export async function saveQualityBlockAction(
     }
     const actualQty = payload.date >= todayStr ? 0 : requestedActualQty;
 
+    const isVirtualSlotId =
+      typeof payload.stationId === 'string' && payload.stationId.startsWith('slot-');
+    const effectiveStationId =
+      payload.stationId && !isVirtualSlotId ? payload.stationId : null;
+
     const checkerTrim = (payload.checkerName || '').trim();
-    if (!checkerTrim || !/^EPF\s*#\d+\s*-\s*.+/i.test(checkerTrim)) {
-      throw new Error(
-        `${payload.stationName} ekata aththa Checker kenek (Employee Registry eken) assign karanna one! Checker kenek assign karanne nathuwa checking plan danna ba.`
-      );
-    }
+    const isRealStaffChecker = /^EPF\s*#\d+\s*-\s*.+/i.test(checkerTrim);
 
-    // Prevent duplicate checker across stations
-    const { data: allCheckers, error: checkErr } = await supabaseAdmin
-      .from('quality_checkers')
-      .select('id, station_name, employee_name')
-      .eq('is_active', true);
-    if (checkErr) throw new Error(formatSupabaseError(checkErr));
+    // Prevent duplicate real staff checker across different slots
+    if (isRealStaffChecker) {
+      const { data: allCheckers, error: checkErr } = await supabaseAdmin
+        .from('quality_checkers')
+        .select('id, station_name, employee_name')
+        .eq('is_active', true);
+      if (checkErr) throw new Error(formatSupabaseError(checkErr));
 
-    for (const oc of allCheckers || []) {
-      const isSameStation =
-        (payload.stationId && String(oc.id) === payload.stationId) ||
-        String(oc.station_name || '').trim().toLowerCase() ===
-          payload.stationName.trim().toLowerCase();
-      if (isSameStation) continue;
+      for (const oc of allCheckers || []) {
+        const isSameStation =
+          (effectiveStationId && String(oc.id) === effectiveStationId) ||
+          String(oc.station_name || '').trim().toLowerCase() ===
+            payload.stationName.trim().toLowerCase();
+        if (isSameStation) continue;
 
-      const ocEmp = String(oc.employee_name || '').trim();
-      if (ocEmp && ocEmp.toLowerCase() === checkerTrim.toLowerCase()) {
-        throw new Error(
-          `${checkerTrim} danatamath ${oc.station_name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
-        );
+        const ocEmp = String(oc.employee_name || '').trim();
+        if (ocEmp && ocEmp.toLowerCase() === checkerTrim.toLowerCase()) {
+          throw new Error(
+            `${checkerTrim} danatamath ${oc.station_name} ekata assign karala thiyenne! Checkersla duplicate wenna ba.`
+          );
+        }
       }
     }
 
@@ -457,13 +486,13 @@ export async function saveQualityBlockAction(
     }
 
     const dbRow = {
-      station_id: payload.stationId || null,
+      station_id: effectiveStationId,
       station_name: payload.stationName.trim(),
-      checker_name: checkerTrim,
+      checker_name: checkerTrim || payload.stationName.trim(),
       style_id: payload.styleId || null,
       style_code: payload.styleCode.trim(),
       style_name: payload.styleName.trim(),
-      part_name: payload.partName.trim(),
+      part_name: (payload.partName || '').trim() || 'Final QC',
       client_name: payload.clientName.trim(),
       assignment_date: payload.date,
       shift: payload.shift || 'day',
@@ -497,23 +526,25 @@ export async function saveQualityBlockAction(
       savedRow = data;
     }
 
-    // Keep quality_checkers.employee_name synced with the assigned checker
-    if (payload.stationId) {
-      await supabaseAdmin
-        .from('quality_checkers')
-        .update({
-          employee_name: checkerTrim,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', payload.stationId);
-    } else if (payload.stationName) {
-      await supabaseAdmin
-        .from('quality_checkers')
-        .update({
-          employee_name: checkerTrim,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('station_name', payload.stationName.trim());
+    // Keep quality_checkers.employee_name synced only when a real staff member is selected
+    if (isRealStaffChecker) {
+      if (effectiveStationId) {
+        await supabaseAdmin
+          .from('quality_checkers')
+          .update({
+            employee_name: checkerTrim,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', effectiveStationId);
+      } else if (payload.stationName) {
+        await supabaseAdmin
+          .from('quality_checkers')
+          .update({
+            employee_name: checkerTrim,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('station_name', payload.stationName.trim());
+      }
     }
 
     revalidatePath('/');

@@ -62,6 +62,7 @@ import {
   PanelLeftOpen,
   Boxes,
   Layers,
+  Truck,
 } from 'lucide-react';
 
 export interface PayrollManagerSessionInfo {
@@ -587,6 +588,16 @@ export function PayrollManager({
                     onSelect: () => {
                       setActiveTab('quality');
                       setQualitySubTab('checkingEditor');
+                    },
+                  },
+                  {
+                    id: 'qual-deliveryPlan',
+                    label: 'Daily Delivery Plan',
+                    icon: Truck,
+                    isSelected: activeTab === 'quality' && qualitySubTab === 'deliveryPlan',
+                    onSelect: () => {
+                      setActiveTab('quality');
+                      setQualitySubTab('deliveryPlan');
                     },
                   },
                   {
