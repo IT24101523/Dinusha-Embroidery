@@ -103,16 +103,6 @@ const PRODUCTION_OPTIONS = [
   'Trial Run',
 ];
 
-const OPERATION_OPTIONS = [
-  'Chest Logo Embroidery',
-  'Back Crest Embroidery',
-  'Sleeve Badge',
-  'Floral Embroidery',
-  'Collar / Cuff Embroidery',
-  'Front Panel',
-  'Side Pocket',
-];
-
 const MACHINE_OPTIONS = Array.from({ length: 13 }, (_, i) =>
   `Machine ${String(i + 1).padStart(2, '0')}`
 );
@@ -610,15 +600,94 @@ export function NeedleManagement({
     return MACHINE_OPTIONS;
   }, [machines]);
 
+  const productionStaffEmployees = useMemo(() => {
+    return employees.filter((emp) => {
+      if (emp.isActive === false) return false;
+      const roleText = String(emp.role || '').trim().toLowerCase();
+      if (
+        /checker|quality|trimmer|packing|hr|admin|account|clerk|office|driver|security|cleaner|maintenance|store/i.test(
+          roleText
+        )
+      ) {
+        return false;
+      }
+      return /production|operator|helper|embroidery|supervisor|ඔපරේටර්|හෙල්පර්|නිෂ්පාදන/i.test(
+        roleText
+      );
+    });
+  }, [employees]);
+
   const styleOptions = useMemo(() => {
     if (!styles || styles.length === 0) return [];
-    return styles.map((s) => (s.code ? `${s.code} - ${s.name}` : s.name));
+    return styles
+      .filter((s) => !s.isCompleted)
+      .map((s) => (s.code ? `${s.code} - ${s.name}` : s.name));
   }, [styles]);
 
-  const operationOptions = useMemo(() => {
-    const partNames = styles.flatMap((s) => s.parts.map((p) => p.name).filter(Boolean));
-    return Array.from(new Set([...partNames, ...OPERATION_OPTIONS]));
-  }, [styles]);
+  const getPartsForStyleLabel = (styleLabel: string): string[] => {
+    const selectedLabel = styleLabel.trim();
+    if (!selectedLabel) return [];
+    const matchedStyle = styles.find((s) => {
+      const label = s.code ? `${s.code} - ${s.name}` : s.name;
+      return (
+        label === selectedLabel ||
+        (s.code && s.code.trim().toLowerCase() === selectedLabel.toLowerCase()) ||
+        s.name.trim().toLowerCase() === selectedLabel.toLowerCase()
+      );
+    });
+    if (!matchedStyle || !Array.isArray(matchedStyle.parts)) return [];
+    return Array.from(
+      new Set(matchedStyle.parts.map((p) => String(p.name || '').trim()).filter(Boolean))
+    );
+  };
+
+  const clnStylePartOptions = useMemo(
+    () => getPartsForStyleLabel(clnStyle),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [styles, clnStyle]
+  );
+
+  const switchStylePartOptions = useMemo(
+    () => getPartsForStyleLabel(switchStyle),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [styles, switchStyle]
+  );
+
+  const brokenStylePartOptions = useMemo(
+    () => getPartsForStyleLabel(brokenStyle),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [styles, brokenStyle]
+  );
+
+  const handleClnStyleChange = (nextStyleLabel: string) => {
+    setClnStyle(nextStyleLabel);
+    const nextParts = getPartsForStyleLabel(nextStyleLabel);
+    if (nextParts.length === 1) {
+      setClnOperation(nextParts[0]);
+    } else if (!nextParts.includes(clnOperation)) {
+      setClnOperation('');
+    }
+  };
+
+  const handleSwitchStyleChange = (nextStyleLabel: string) => {
+    setSwitchStyle(nextStyleLabel);
+    const nextParts = getPartsForStyleLabel(nextStyleLabel);
+    if (nextParts.length === 1) {
+      setSwitchSeam(nextParts[0]);
+    } else if (!nextParts.includes(switchSeam)) {
+      setSwitchSeam('');
+    }
+  };
+
+  const handleBrokenStyleChange = (nextStyleLabel: string) => {
+    setBrokenStyle(nextStyleLabel);
+    const nextParts = getPartsForStyleLabel(nextStyleLabel);
+    if (nextParts.length === 1) {
+      setBrokenSeam(nextParts[0]);
+    } else if (!nextParts.includes(brokenSeam)) {
+      setBrokenSeam('');
+    }
+  };
 
   const showSuccess = (text: string) => {
     setStatusMsg({ type: 'success', text });
@@ -1298,9 +1367,9 @@ export function NeedleManagement({
         </div>
       )}
 
-      {/* Employee datalist for quick EPF / Name selection */}
+      {/* Employee datalist for quick EPF / Name selection (Production Staff Only) */}
       <datalist id="needle-employee-options">
-        {employees.map((emp) => (
+        {productionStaffEmployees.map((emp) => (
           <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`} />
         ))}
       </datalist>
@@ -2301,12 +2370,12 @@ export function NeedleManagement({
                       onChange={(e) => setClnEpf(e.target.value)}
                       className="cln-select w-full font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-[11px]"
                     >
-                      <option value="">-- Select EPF --</option>
+                      <option value="">-- Select Production Staff --</option>
                       {clnEpf &&
-                        !employees.some((emp) => `EPF ${emp.epfNo} - ${emp.fullName}` === clnEpf) && (
-                          <option value={clnEpf}>{clnEpf}</option>
-                        )}
-                      {employees.map((emp) => (
+                        !productionStaffEmployees.some(
+                          (emp) => `EPF ${emp.epfNo} - ${emp.fullName}` === clnEpf
+                        ) && <option value={clnEpf}>{clnEpf}</option>}
+                      {productionStaffEmployees.map((emp) => (
                         <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
                           EPF #{emp.epfNo} - {emp.fullName}
                         </option>
@@ -2326,7 +2395,7 @@ export function NeedleManagement({
                     {styleOptions.length > 0 ? (
                       <select
                         value={clnStyle}
-                        onChange={(e) => setClnStyle(e.target.value)}
+                        onChange={(e) => handleClnStyleChange(e.target.value)}
                         className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]"
                       >
                         <option value="">-- Select Style --</option>
@@ -2345,25 +2414,32 @@ export function NeedleManagement({
                         maxLength={60}
                         placeholder="Enter Style No"
                         value={clnStyle}
-                        onChange={(e) => setClnStyle(e.target.value)}
+                        onChange={(e) => handleClnStyleChange(e.target.value)}
                         className="w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 print:border-none print:bg-transparent"
                       />
                     )}
                   </td>
                   <td className="w-1/3 border-r border-black p-1.5 align-top">
-                    <div className="font-bold text-center mb-1">Operation</div>
+                    <div className="font-bold text-center mb-1">Operation / Part</div>
                     <select
                       value={clnOperation}
                       onChange={(e) => setClnOperation(e.target.value)}
-                      className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]"
+                      disabled={!clnStyle.trim() && !clnOperation}
+                      className="cln-select w-full text-center font-bold bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-60"
                     >
-                      <option value="">-- Select Operation --</option>
-                      {clnOperation && !operationOptions.includes(clnOperation) && (
+                      <option value="">
+                        {!clnStyle.trim()
+                          ? '-- Select Style First --'
+                          : clnStylePartOptions.length === 0
+                          ? '-- No Parts for This Style --'
+                          : '-- Select Part --'}
+                      </option>
+                      {clnOperation && !clnStylePartOptions.includes(clnOperation) && (
                         <option value={clnOperation}>{clnOperation}</option>
                       )}
-                      {operationOptions.map((op) => (
-                        <option key={op} value={op}>
-                          {op}
+                      {clnStylePartOptions.map((partName) => (
+                        <option key={partName} value={partName}>
+                          {partName}
                         </option>
                       ))}
                     </select>
@@ -2725,10 +2801,10 @@ export function NeedleManagement({
                         required
                         className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                       >
-                        <option value="">-- Select Operator --</option>
-                        {employees.map((emp) => (
+                        <option value="">-- Select Production Staff --</option>
+                        {productionStaffEmployees.map((emp) => (
                           <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
-                            EPF #{emp.epfNo} - {emp.fullName}
+                            EPF #{emp.epfNo} - {emp.fullName} ({emp.role})
                           </option>
                         ))}
                       </select>
@@ -2758,7 +2834,7 @@ export function NeedleManagement({
                       {styleOptions.length > 0 ? (
                         <select
                           value={switchStyle}
-                          onChange={(e) => setSwitchStyle(e.target.value)}
+                          onChange={(e) => handleSwitchStyleChange(e.target.value)}
                           required
                           className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                         >
@@ -2776,25 +2852,32 @@ export function NeedleManagement({
                           required
                           placeholder="Enter Style No."
                           value={switchStyle}
-                          onChange={(e) => setSwitchStyle(e.target.value)}
+                          onChange={(e) => handleSwitchStyleChange(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                         />
                       )}
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Seam Location *
+                        Part / Seam Location *
                       </label>
                       <select
                         value={switchSeam}
                         onChange={(e) => setSwitchSeam(e.target.value)}
                         required
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                        disabled={!switchStyle.trim() && !switchSeam}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500 disabled:opacity-60"
                       >
-                        <option value="">-- Select Seam Location --</option>
-                        {operationOptions.map((op) => (
-                          <option key={op} value={op}>
-                            {op}
+                        <option value="">
+                          {!switchStyle.trim()
+                            ? '-- Select Style First --'
+                            : switchStylePartOptions.length === 0
+                            ? '-- No Parts for This Style --'
+                            : '-- Select Part --'}
+                        </option>
+                        {switchStylePartOptions.map((partName) => (
+                          <option key={partName} value={partName}>
+                            {partName}
                           </option>
                         ))}
                       </select>
@@ -2997,10 +3080,10 @@ export function NeedleManagement({
                       required
                       className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                     >
-                      <option value="">-- Select Operator --</option>
-                      {employees.map((emp) => (
+                      <option value="">-- Select Production Staff --</option>
+                      {productionStaffEmployees.map((emp) => (
                         <option key={emp.id} value={`EPF ${emp.epfNo} - ${emp.fullName}`}>
-                          EPF #{emp.epfNo} - {emp.fullName}
+                          EPF #{emp.epfNo} - {emp.fullName} ({emp.role})
                         </option>
                       ))}
                     </select>
@@ -3031,7 +3114,7 @@ export function NeedleManagement({
                     {styleOptions.length > 0 ? (
                       <select
                         value={brokenStyle}
-                        onChange={(e) => setBrokenStyle(e.target.value)}
+                        onChange={(e) => handleBrokenStyleChange(e.target.value)}
                         required
                         className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                       >
@@ -3049,25 +3132,32 @@ export function NeedleManagement({
                         required
                         placeholder="Enter Style No."
                         value={brokenStyle}
-                        onChange={(e) => setBrokenStyle(e.target.value)}
+                        onChange={(e) => handleBrokenStyleChange(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
                       />
                     )}
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Seam Location *
+                      Part / Seam Location *
                     </label>
                     <select
                       value={brokenSeam}
                       onChange={(e) => setBrokenSeam(e.target.value)}
                       required
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500"
+                      disabled={!brokenStyle.trim() && !brokenSeam}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-persian-500 disabled:opacity-60"
                     >
-                      <option value="">-- Select Seam Location --</option>
-                      {operationOptions.map((op) => (
-                        <option key={op} value={op}>
-                          {op}
+                      <option value="">
+                        {!brokenStyle.trim()
+                          ? '-- Select Style First --'
+                          : brokenStylePartOptions.length === 0
+                          ? '-- No Parts for This Style --'
+                          : '-- Select Part --'}
+                      </option>
+                      {brokenStylePartOptions.map((partName) => (
+                        <option key={partName} value={partName}>
+                          {partName}
                         </option>
                       ))}
                     </select>

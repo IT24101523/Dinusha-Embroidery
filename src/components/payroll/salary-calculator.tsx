@@ -18,6 +18,7 @@ import {
 import {
   saveMonthlySalaryAction,
   fetchSalaryRecordAction,
+  fetchMonthlyRecordsAction,
   fetchEmployeeAnnualLeaveByYearAction,
   updateSalaryPaymentStatusAction,
 } from '@/actions/payroll';
@@ -103,6 +104,8 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
   const [advance, setAdvance] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
+  const [isFetchingRecord, setIsFetchingRecord] = useState(false);
+  const [calculatedEmployeeIds, setCalculatedEmployeeIds] = useState<Set<string>>(new Set());
   const [recordStatus, setRecordStatus] = useState<'DRAFT' | 'APPROVED' | 'PAID' | null>(null);
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
@@ -150,6 +153,20 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     return m ? m[1] : String(new Date().getFullYear());
   }, [month]);
 
+  // Fetch all calculated employee IDs for the selected month (for dropdown & progress indicator)
+  useEffect(() => {
+    let active = true;
+    fetchMonthlyRecordsAction(month)
+      .then((res) => {
+        if (!active || !res.success || !res.data) return;
+        setCalculatedEmployeeIds(new Set(res.data.map((r) => r.employeeId)));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [month]);
+
   // Load existing salary record & annual leave ledger when employee or month changes
   useEffect(() => {
     if (!currentEmployee) return;
@@ -157,17 +174,25 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
     let isMounted = true;
     async function loadExisting() {
       setStatusMsg(null);
+      setIsFetchingRecord(true);
       const [res, leaveRes] = await Promise.all([
         fetchSalaryRecordAction(currentEmployee!.id, month),
         fetchEmployeeAnnualLeaveByYearAction(currentEmployee!.id, selectedYear),
       ]);
       if (!isMounted) return;
+      setIsFetchingRecord(false);
 
       const leaveMap = leaveRes.success && leaveRes.leaveByMonth ? leaveRes.leaveByMonth : {};
       setYearLeaveByMonth(leaveMap);
 
       if (res.success && res.data) {
         const d = res.data;
+        setCalculatedEmployeeIds((prev) => {
+          if (prev.has(currentEmployee!.id)) return prev;
+          const next = new Set(prev);
+          next.add(currentEmployee!.id);
+          return next;
+        });
         setOtHours(d.otHours);
         setSotHours(d.sotHours);
         setTotAmt(d.totAmt);
@@ -476,6 +501,11 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
 
     if (res.success && res.breakdown) {
       setRecordStatus((res.breakdown.status as 'APPROVED' | 'PAID') || 'APPROVED');
+      setCalculatedEmployeeIds((prev) => {
+        const next = new Set(prev);
+        next.add(validated.employeeId);
+        return next;
+      });
       setYearLeaveByMonth((prev) => ({
         ...prev,
         [validated.month]: validated.annualLeaveDays || 0,
@@ -624,9 +654,36 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
                   <span className="text-[10px] font-mono text-slate-300">{currentEmployee.nic}</span>
                 )}
               </div>
-              <h3 className="text-base font-extrabold text-white tracking-tight truncate mt-0.5">
-                {currentEmployee.fullName}
-              </h3>
+              <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                <h3 className="text-base font-extrabold text-white tracking-tight truncate">
+                  {currentEmployee.fullName}
+                </h3>
+                {isFetchingRecord ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-slate-300 border border-white/15 inline-flex items-center gap-1 shrink-0">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Checking...
+                  </span>
+                ) : recordStatus !== null ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/25 text-emerald-200 border border-emerald-400/50 inline-flex items-center gap-1 shrink-0 shadow-xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                    Calculated
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-500/25 text-rose-200 border border-rose-400/50 inline-flex items-center gap-1 shrink-0 shadow-xs">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-300" />
+                    Not Calculated
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Center: Prominent Payroll Month Display */}
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-3 py-0.5 min-w-[160px]">
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-indigo-300/90 leading-none">
+              Payroll Month
+            </span>
+            <div className="text-xl sm:text-2xl font-black tracking-wide text-amber-300 uppercase leading-tight mt-0.5">
+              {month}
             </div>
           </div>
 
@@ -730,13 +787,17 @@ export function SalaryCalculator({ employees, selectedEmployeeId }: SalaryCalcul
               onChange={(e) => setSelectedId(e.target.value)}
               className="w-full px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
             >
-              {(visibleEmployees.length > 0 ? visibleEmployees : employees).map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {isNonEpfEmployee(emp)
-                    ? `[Non-EPF] ${emp.fullName} (${emp.role})`
-                    : `EPF ${emp.epfNo} - ${emp.fullName} (${emp.role})`}
-                </option>
-              ))}
+              {(visibleEmployees.length > 0 ? visibleEmployees : employees).map((emp) => {
+                const isCalc = calculatedEmployeeIds.has(emp.id);
+                const statusSuffix = isCalc ? ' — ✓ Calculated' : ' — Not Calculated';
+                return (
+                  <option key={emp.id} value={emp.id}>
+                    {isNonEpfEmployee(emp)
+                      ? `[Non-EPF] ${emp.fullName} (${emp.role})${statusSuffix}`
+                      : `EPF ${emp.epfNo} - ${emp.fullName} (${emp.role})${statusSuffix}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

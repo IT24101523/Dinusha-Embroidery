@@ -11,6 +11,7 @@ export type ErpModuleId =
   | 'needle'
   | 'inventory'
   | 'production'
+  | 'styleInOut'
   | 'quality'
   | 'quotations'
   | 'adminUsers'
@@ -91,6 +92,12 @@ export const ALL_ERP_MODULES: ErpModuleMeta[] = [
     description: 'Style Master, Machines & Gantt Matrix',
   },
   {
+    id: 'styleInOut',
+    label: 'Style In & Out',
+    category: 'Operations',
+    description: 'Cut-In Batches, Yellow Bundle Check List, Despatch Note & Gate Pass',
+  },
+  {
     id: 'quality',
     label: 'Quality Checking',
     category: 'Operations',
@@ -133,6 +140,7 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'needle',
     'inventory',
     'production',
+    'styleInOut',
     'quality',
     'quotations',
   ],
@@ -142,6 +150,7 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'needle',
     'inventory',
     'production',
+    'styleInOut',
     'quality',
     'quotations',
   ],
@@ -156,8 +165,8 @@ export const ROLE_DEFAULT_MODULES: Record<UserRole, ErpModuleId[]> = {
     'needle',
     'inventory',
   ],
-  PRODUCTION_MANAGER: ['dashboard', 'inventory', 'production', 'quotations'],
-  QUALITY_MANAGER: ['dashboard', 'quality'],
+  PRODUCTION_MANAGER: ['dashboard', 'inventory', 'production', 'styleInOut', 'quotations'],
+  QUALITY_MANAGER: ['dashboard', 'styleInOut', 'quality'],
 };
 
 export function resolveAllowedModules(
@@ -175,6 +184,12 @@ export function resolveAllowedModules(
       !filtered.includes('inventory')
     ) {
       filtered.push('inventory');
+    }
+    if (
+      (filtered.includes('production') || filtered.includes('quality')) &&
+      !filtered.includes('styleInOut')
+    ) {
+      filtered.push('styleInOut');
     }
     if (filtered.length > 0) return filtered;
   }

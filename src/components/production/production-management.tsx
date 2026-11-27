@@ -813,12 +813,6 @@ export function ProductionManagement({
     }
   }, [companies, styleCompany]);
 
-  useEffect(() => {
-    if (!selectedStrikeOffStyleId && styles.length > 0) {
-      setSelectedStrikeOffStyleId(styles[0].id);
-    }
-  }, [styles, selectedStrikeOffStyleId]);
-
   const resetStyleForm = () => {
     setEditingStyleId(null);
     setStyleCode('');
@@ -1445,6 +1439,32 @@ export function ProductionManagement({
     [activeStylesMetrics]
   );
 
+  const doneStyleLookup = useMemo(() => {
+    const ids = new Set<string>();
+    const codes = new Set<string>();
+    const names = new Set<string>();
+    for (const m of doneStylesMetrics) {
+      ids.add(m.style.id);
+      if (m.style.code) codes.add(m.style.code.trim().toLowerCase());
+      if (m.style.name) names.add(m.style.name.trim().toLowerCase());
+    }
+    return { ids, codes, names };
+  }, [doneStylesMetrics]);
+
+  // Keep Strike-Off style synced to active (non-done) styles only
+  useEffect(() => {
+    if (activeStylesMetrics.length > 0) {
+      if (
+        !selectedStrikeOffStyleId ||
+        !activeStylesMetrics.some((m) => m.style.id === selectedStrikeOffStyleId)
+      ) {
+        setSelectedStrikeOffStyleId(activeStylesMetrics[0].style.id);
+      }
+    } else if (selectedStrikeOffStyleId) {
+      setSelectedStrikeOffStyleId('');
+    }
+  }, [activeStylesMetrics, selectedStrikeOffStyleId]);
+
   const companyFilteredStyles = useMemo(() => {
     if (!planCompany) return [];
     const targetCompany = planCompany.trim().toLowerCase();
@@ -1519,10 +1539,21 @@ export function ProductionManagement({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planMachineName, machines, activeEmployees]);
 
-  // Filtered plans for currently selected Date & Shift
+  // Filtered plans for currently selected Date & Shift (exclude Done/Completed styles)
   const activeDateShiftPlans = useMemo(
-    () => plans.filter((p) => p.date === planDate && p.shift === planShift),
-    [plans, planDate, planShift]
+    () =>
+      plans.filter((p) => {
+        if (p.date !== planDate || p.shift !== planShift) return false;
+        if (p.styleId && doneStyleLookup.ids.has(p.styleId)) return false;
+        if (p.styleCode && doneStyleLookup.codes.has(p.styleCode.trim().toLowerCase())) {
+          return false;
+        }
+        if (p.styleName && doneStyleLookup.names.has(p.styleName.trim().toLowerCase())) {
+          return false;
+        }
+        return true;
+      }),
+    [plans, planDate, planShift, doneStyleLookup]
   );
 
   // Close custom calendar popover when clicking outside
@@ -2744,8 +2775,11 @@ export function ProductionManagement({
   }, [activeDateShiftPlans, styles, machines]);
 
   const strikeOffStyle = useMemo(
-    () => styles.find((s) => s.id === selectedStrikeOffStyleId) || styles[0] || null,
-    [styles, selectedStrikeOffStyleId]
+    () =>
+      activeStylesMetrics.find((m) => m.style.id === selectedStrikeOffStyleId)?.style ||
+      activeStylesMetrics[0]?.style ||
+      null,
+    [activeStylesMetrics, selectedStrikeOffStyleId]
   );
 
   // Fullscreen state for Live Floor Display (shows all 13 machines on 1 screen with only the header bar)
@@ -3210,8 +3244,9 @@ export function ProductionManagement({
                       );
                       const matchingStyles = styles.filter(
                         (s) =>
-                          (matchedClient && s.clientId && s.clientId === matchedClient.id) ||
-                          s.company.trim().toLowerCase() === target
+                          activeStyleIdsSet.has(s.id) &&
+                          ((matchedClient && s.clientId && s.clientId === matchedClient.id) ||
+                            s.company.trim().toLowerCase() === target)
                       );
                       setPlanStyleId(matchingStyles[0]?.id || '');
                     }}
@@ -5885,10 +5920,10 @@ export function ProductionManagement({
                   onChange={(e) => setSelectedStrikeOffStyleId(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold"
                 >
-                  {styles.length === 0 ? (
-                    <option value="">-- No Styles --</option>
+                  {activeStylesMetrics.length === 0 ? (
+                    <option value="">-- No Active Styles --</option>
                   ) : (
-                    styles.map((s) => (
+                    activeStylesMetrics.map(({ style: s }) => (
                       <option key={s.id} value={s.id}>
                         {s.code ? `${s.code} — ${s.name}` : s.name} ({s.company})
                       </option>
@@ -6362,8 +6397,9 @@ export function ProductionManagement({
                     companies.map((c) => {
                       const styleCount = styles.filter(
                         (s) =>
-                          (s.clientId && s.clientId === c.id) ||
-                          s.company.trim().toLowerCase() === c.name.trim().toLowerCase()
+                          activeStyleIdsSet.has(s.id) &&
+                          ((s.clientId && s.clientId === c.id) ||
+                            s.company.trim().toLowerCase() === c.name.trim().toLowerCase())
                       ).length;
                       return (
                         <tr key={c.id} className="hover:bg-slate-50">

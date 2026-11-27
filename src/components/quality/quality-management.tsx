@@ -464,7 +464,6 @@ export function QualityManagement({
   const [deliveryPlanDays, setDeliveryPlanDays] = useState<7 | 10 | 14>(7);
   const [deliveryPlanCompanyFilter, setDeliveryPlanCompanyFilter] = useState<string>('ALL');
   const [deliveryPlanSearch, setDeliveryPlanSearch] = useState<string>('');
-  const [deliveryPlanIncludeDone, setDeliveryPlanIncludeDone] = useState<boolean>(false);
   const [deliveryDraftMap, setDeliveryDraftMap] = useState<Record<string, string>>({});
   const [savingDeliveryCellKey, setSavingDeliveryCellKey] = useState<string | null>(null);
 
@@ -655,8 +654,26 @@ export function QualityManagement({
         remainingQty: s.qty,
         todayDeliveryQty: getDeliveryTargetForStyle(s, planDate),
         lastCheckDate: s.completedAt ? s.completedAt.split('T')[0] : '',
-        isDone: false,
+        isDone: s.isCompleted === true,
       });
+    }
+
+    // Track Production done qty per style so styles completed in Production are also treated as Done
+    const prodDoneByStyleId = new Map<string, number>();
+    for (const p of productionBundle.plans || []) {
+      const matched =
+        (p.styleId && map.get(p.styleId)) ||
+        Array.from(map.values()).find(
+          (item) =>
+            (p.styleCode && item.style.code === p.styleCode) ||
+            item.style.name.trim().toLowerCase() === p.styleName.trim().toLowerCase()
+        );
+      if (matched) {
+        prodDoneByStyleId.set(
+          matched.style.id,
+          (prodDoneByStyleId.get(matched.style.id) || 0) + p.actualQty
+        );
+      }
     }
 
     for (const b of blocks) {
@@ -682,14 +699,19 @@ export function QualityManagement({
     }
 
     for (const item of map.values()) {
-      if (item.orderQty > 0 && item.actualDoneQty >= item.orderQty) {
+      const prodDoneQty = prodDoneByStyleId.get(item.style.id) || 0;
+      if (
+        item.style.isCompleted === true ||
+        (item.orderQty > 0 && item.actualDoneQty >= item.orderQty) ||
+        (item.orderQty > 0 && prodDoneQty >= item.orderQty)
+      ) {
         item.isDone = true;
       }
     }
 
     return Array.from(map.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [styles, blocks, deliveryTargets, planDate]);
+  }, [styles, blocks, productionBundle.plans, deliveryTargets, planDate]);
 
   const activeStylesMetrics = useMemo(
     () => styleQualityMetricsMap.filter((item) => !item.isDone),
@@ -826,10 +848,33 @@ export function QualityManagement({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planStationName, checkerSlots, activeEmployees]);
 
-  // Filtered blocks for currently selected Date & Shift
+  const doneStyleLookup = useMemo(() => {
+    const ids = new Set<string>();
+    const codes = new Set<string>();
+    const names = new Set<string>();
+    for (const m of doneStylesMetrics) {
+      ids.add(m.style.id);
+      if (m.style.code) codes.add(m.style.code.trim().toLowerCase());
+      if (m.style.name) names.add(m.style.name.trim().toLowerCase());
+    }
+    return { ids, codes, names };
+  }, [doneStylesMetrics]);
+
+  // Filtered blocks for currently selected Date & Shift (exclude Done/Completed styles)
   const activeDateShiftBlocks = useMemo(
-    () => blocks.filter((b) => b.date === planDate && b.shift === planShift),
-    [blocks, planDate, planShift]
+    () =>
+      blocks.filter((b) => {
+        if (b.date !== planDate || b.shift !== planShift) return false;
+        if (b.styleId && doneStyleLookup.ids.has(b.styleId)) return false;
+        if (b.styleCode && doneStyleLookup.codes.has(b.styleCode.trim().toLowerCase())) {
+          return false;
+        }
+        if (b.styleName && doneStyleLookup.names.has(b.styleName.trim().toLowerCase())) {
+          return false;
+        }
+        return true;
+      }),
+    [blocks, planDate, planShift, doneStyleLookup]
   );
 
   // Close custom calendar popover when clicking outside
@@ -951,9 +996,8 @@ export function QualityManagement({
   }, [deliveryPlanStartDate, deliveryPlanDays, todayStr]);
 
   const filteredDeliveryPlanRows = useMemo(() => {
-    const base = deliveryPlanIncludeDone ? styleQualityMetricsMap : activeStylesMetrics;
     const q = deliveryPlanSearch.trim().toLowerCase();
-    return base.filter((item) => {
+    return activeStylesMetrics.filter((item) => {
       if (deliveryPlanCompanyFilter !== 'ALL') {
         if (
           item.style.company.trim().toLowerCase() !==
@@ -971,8 +1015,6 @@ export function QualityManagement({
       return true;
     });
   }, [
-    deliveryPlanIncludeDone,
-    styleQualityMetricsMap,
     activeStylesMetrics,
     deliveryPlanCompanyFilter,
     deliveryPlanSearch,
@@ -3294,27 +3336,15 @@ export function QualityManagement({
                 </select>
               </div>
 
-              <div className="xl:col-span-2 relative">
+              <div className="xl:col-span-4 relative">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Search style..."
+                  placeholder="Search active style..."
                   value={deliveryPlanSearch}
                   onChange={(e) => setDeliveryPlanSearch(e.target.value)}
                   className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold outline-none"
                 />
-              </div>
-
-              <div className="xl:col-span-2 flex items-center justify-end">
-                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={deliveryPlanIncludeDone}
-                    onChange={(e) => setDeliveryPlanIncludeDone(e.target.checked)}
-                    className="rounded border-slate-300 text-persian-600 focus:ring-persian-500 cursor-pointer"
-                  />
-                  <span>Include Done Styles</span>
-                </label>
               </div>
             </div>
 

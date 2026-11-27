@@ -8,6 +8,7 @@ import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { ProductionBundle } from '@/actions/production';
 import { QualityBundle } from '@/actions/quality';
 import { ProductionQuotationEntity } from '@/actions/quotations';
+import { StyleInOutBundle } from '@/actions/style-in-out';
 import { ErpModuleId, ROLE_LABELS } from '@/lib/rbac';
 import type { UserRole } from '@/db/schema/users';
 import { FactoryDashboard } from '@/components/dashboard/factory-dashboard';
@@ -80,6 +81,7 @@ interface PayrollManagerProps {
   initialProductionBundle?: ProductionBundle;
   initialQualityBundle?: QualityBundle;
   initialQuotations?: ProductionQuotationEntity[];
+  initialStyleInOutBundle?: StyleInOutBundle;
   sessionInfo?: PayrollManagerSessionInfo;
 }
 
@@ -114,7 +116,9 @@ export function PayrollManager({
   );
   const allowedSet = useMemo(() => new Set<ErpModuleId>(allowedModules), [allowedModules]);
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>(
-    allowedModules.includes('dashboard') ? 'dashboard' : allowedModules[0] || 'dashboard'
+    allowedModules.includes('dashboard')
+      ? 'dashboard'
+      : allowedModules.find((m) => m !== 'styleInOut') || 'dashboard'
   );
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [payrollOpen, setPayrollOpen] = useState(false);
@@ -219,6 +223,15 @@ export function PayrollManager({
         subtitle: 'Style Master, Machines & Gantt Matrix',
         badge: 'Live',
         icon: Cpu,
+      },
+      {
+        id: 'styleInOut',
+        section: 'overview',
+        label: 'Style In & Out',
+        subtitle: 'Under Construction — Coming Soon',
+        badge: 'Under Construction',
+        isUpcoming: true,
+        icon: Truck,
       },
       {
         id: 'quality',
@@ -585,6 +598,24 @@ export function PayrollManager({
                 ],
               },
               {
+                key: 'styleInOut',
+                allowed: allowedSet.has('styleInOut'),
+                title: 'Style In & Out',
+                subtitle: 'Under Construction',
+                icon: Truck,
+                isActive: false,
+                isLocked: true,
+                subItems: [
+                  {
+                    id: 'sio-locked',
+                    label: 'Under Construction',
+                    icon: Clock,
+                    isSelected: false,
+                    onSelect: () => {},
+                  },
+                ],
+              },
+              {
                 key: 'quality',
                 allowed: allowedSet.has('quality'),
                 title: 'Quality Checking',
@@ -811,12 +842,15 @@ export function PayrollManager({
               .filter((group) => group.allowed && group.subItems.length > 0)
               .map((group) => {
                 const GroupIcon = group.icon;
+                const isLocked = Boolean((group as { isLocked?: boolean }).isLocked);
                 const isOpen =
-                  group.key === 'payroll'
+                  !isLocked &&
+                  (group.key === 'payroll'
                     ? payrollOpen || group.isActive
-                    : Boolean(openMenus[group.key] ?? group.isActive);
+                    : Boolean(openMenus[group.key] ?? group.isActive));
 
                 const handleToggle = () => {
+                  if (isLocked) return;
                   if (!sidebarExpanded) {
                     setSidebarExpanded(true);
                     if (group.key === 'payroll') setPayrollOpen(true);
@@ -836,24 +870,30 @@ export function PayrollManager({
                     {/* Collapsible Module Dropdown Trigger */}
                     <button
                       type="button"
+                      disabled={isLocked}
+                      aria-disabled={isLocked}
                       aria-expanded={sidebarExpanded && isOpen}
-                      title={group.title}
+                      title={isLocked ? `${group.title} — Under Construction` : group.title}
                       onClick={handleToggle}
                       className={`relative w-full text-left ${
                         sidebarExpanded
                           ? 'px-3.5 py-2 justify-start gap-3'
                           : 'px-2.5 py-2 justify-center gap-0'
-                      } rounded-xl transition-all duration-200 flex items-center group cursor-pointer ${
-                        group.isActive
-                          ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm'
-                          : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                      } rounded-xl transition-all duration-200 flex items-center group ${
+                        isLocked
+                          ? 'opacity-60 cursor-not-allowed text-slate-400 bg-slate-900/40'
+                          : group.isActive
+                          ? 'cursor-pointer bg-indigo-600/20 text-white ring-1 ring-indigo-500/50 shadow-sm'
+                          : 'cursor-pointer text-slate-300 hover:bg-slate-900 hover:text-white'
                       }`}
                     >
                       <div
                         className={`${
                           sidebarExpanded ? 'w-8 h-8' : 'w-9 h-9'
                         } rounded-lg flex items-center justify-center shrink-0 transition ${
-                          group.isActive
+                          isLocked
+                            ? 'bg-amber-500/15 text-amber-400'
+                            : group.isActive
                             ? 'bg-indigo-500 text-white shadow-sm'
                             : 'bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200'
                         }`}
@@ -865,14 +905,22 @@ export function PayrollManager({
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-bold truncate">{group.title}</span>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700/80">
-                                {group.subItems.length}
-                              </span>
-                              <ChevronDown
-                                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                                  isOpen ? 'rotate-180 text-indigo-300' : ''
-                                }`}
-                              />
+                              {isLocked ? (
+                                <span className="px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  Under Construction
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700/80">
+                                    {group.subItems.length}
+                                  </span>
+                                  <ChevronDown
+                                    className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                                      isOpen ? 'rotate-180 text-indigo-300' : ''
+                                    }`}
+                                  />
+                                </>
+                              )}
                             </div>
                           </div>
                           <p className="text-[10px] text-slate-400 truncate mt-0.5">
@@ -1037,29 +1085,40 @@ export function PayrollManager({
         >
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
-            const isSelected = activeTab === item.id;
+            const isLocked = Boolean(item.isUpcoming);
+            const isSelected = !isLocked && activeTab === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
                 role="tab"
+                disabled={isLocked}
+                aria-disabled={isLocked}
                 id={`${tabIdPrefix}-mobile-${item.id}`}
                 aria-selected={isSelected}
                 onClick={(e) => {
+                  if (isLocked) return;
                   setActiveTab(item.id);
                   e.currentTarget.scrollIntoView({
                     block: 'nearest',
                     inline: 'nearest',
                   });
                 }}
-                className={`relative flex-none snap-start px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white shadow-sm after:content-[""] after:absolute after:inset-x-3 after:bottom-0 after:border-b-2 after:border-amber-300'
-                    : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                className={`relative flex-none snap-start px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  isLocked
+                    ? 'bg-slate-900/50 text-slate-500 opacity-65 cursor-not-allowed'
+                    : isSelected
+                    ? 'cursor-pointer bg-indigo-600 text-white shadow-sm after:content-[""] after:absolute after:inset-x-3 after:bottom-0 after:border-b-2 after:border-amber-300'
+                    : 'cursor-pointer bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{item.label}</span>
+                {isLocked && (
+                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-extrabold uppercase">
+                    Soon
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1100,6 +1159,7 @@ export function PayrollManager({
               <FactoryDashboard
                 employees={employees}
                 productionBundle={productionBundle}
+                qualityBundle={qualityBundle}
                 onNavigate={(tab) => {
                   if (
                     tab === 'employees' ||
@@ -1191,6 +1251,25 @@ export function PayrollManager({
                 onBundleChange={setProductionBundle}
                 externalSubTab={productionSubTab}
               />
+            </div>
+          )}
+
+          {activeTab === 'styleInOut' && allowedSet.has('styleInOut') && (
+            <div role="tabpanel" aria-labelledby={`${tabIdPrefix}-desktop-styleInOut`}>
+              <div className="bg-white rounded-2xl border border-amber-200 shadow-xs p-10 text-center space-y-3 max-w-xl mx-auto mt-6">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+                  <Clock className="w-7 h-7" />
+                </div>
+                <span className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-black uppercase tracking-wider">
+                  Under Construction
+                </span>
+                <h3 className="text-lg font-black text-slate-900">
+                  Style In &amp; Out Control Module
+                </h3>
+                <p className="text-xs text-slate-500">
+                  This section is currently under construction and temporarily locked.
+                </p>
+              </div>
             </div>
           )}
 

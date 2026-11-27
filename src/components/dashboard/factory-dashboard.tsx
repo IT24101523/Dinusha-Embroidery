@@ -3,21 +3,14 @@
 import React, { useMemo } from 'react';
 import { EmployeeEntity } from '@/modules/payroll/domain/entities';
 import { ProductionBundle } from '@/actions/production';
+import { QualityBundle } from '@/actions/quality';
 import {
   Users,
-  Wallet,
   Cpu,
-  ClipboardCheck,
-  Landmark,
   ArrowRight,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  FileCheck,
   Calculator,
   Printer,
   Table2,
-  Pin,
   Layers,
 } from 'lucide-react';
 
@@ -37,12 +30,14 @@ export type DashboardTargetTab =
 interface FactoryDashboardProps {
   employees: EmployeeEntity[];
   productionBundle: ProductionBundle;
+  qualityBundle?: QualityBundle;
   onNavigate: (tab: DashboardTargetTab) => void;
 }
 
 export function FactoryDashboard({
   employees,
   productionBundle,
+  qualityBundle,
   onNavigate,
 }: FactoryDashboardProps) {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -54,18 +49,6 @@ export function FactoryDashboard({
       e.role.toLowerCase().includes('supervisor')
     ).length;
     const operators = totalStaff - supervisors;
-    const totalBasic = employees.reduce((sum, e) => sum + (Number(e.basicSalary) || 0), 0);
-    const estStatutory = Math.round(totalBasic * 0.23); // 20% EPF + 3% ETF
-
-    const compliantCount = employees.filter((e) =>
-      [
-        e.hasNicCopy,
-        e.hasBirthCertificate,
-        e.hasGramasewakaCert,
-        e.hasMedicalReport,
-        e.hasAppointmentLetter,
-      ].every(Boolean)
-    ).length;
 
     const roleMap = new Map<string, number>();
     for (const emp of employees) {
@@ -78,29 +61,61 @@ export function FactoryDashboard({
       activeStaff,
       supervisors,
       operators,
-      totalBasic,
-      estStatutory,
-      compliantCount,
       roleBreakdown,
     };
   }, [employees]);
 
   const prodStats = useMemo(() => {
     const { companies, machines, styles, plans } = productionBundle;
-    const todayPlans = plans.filter((p) => p.date === todayStr);
-    const todayPlanQty = todayPlans.reduce((sum, p) => sum + p.planQty, 0);
-    const todayActualQty = todayPlans.reduce((sum, p) => sum + p.actualQty, 0);
-    const todayPct = todayPlanQty > 0 ? Math.round((todayActualQty / todayPlanQty) * 100) : 0;
+    const qualityBlocks = qualityBundle?.blocks || [];
 
-    const activeMachines = machines.filter((m) => m.status === 'Active').length;
+    const activeStylesWithMetrics: Array<{
+      id: string;
+      code: string;
+      name: string;
+      company: string;
+      orderQty: number;
+      plannedQty: number;
+      doneQty: number;
+      remaining: number;
+    }> = [];
 
-    const styleCards = styles.slice(0, 6).map((s) => {
+    const doneStyleIds = new Set<string>();
+    const doneStyleCodes = new Set<string>();
+    const doneStyleNames = new Set<string>();
+
+    for (const s of styles) {
       const stylePlans = plans.filter(
-        (p) => p.styleId === s.id || p.styleCode === s.code || p.styleName === s.name
+        (p) =>
+          (p.styleId && p.styleId === s.id) ||
+          (p.styleCode && s.code && p.styleCode === s.code) ||
+          p.styleName.trim().toLowerCase() === s.name.trim().toLowerCase()
       );
       const planned = stylePlans.reduce((sum, p) => sum + p.planQty, 0);
       const done = stylePlans.reduce((sum, p) => sum + p.actualQty, 0);
-      return {
+
+      const qualityDone = qualityBlocks
+        .filter(
+          (b) =>
+            (b.styleId && b.styleId === s.id) ||
+            (b.styleCode && s.code && b.styleCode === s.code) ||
+            b.styleName.trim().toLowerCase() === s.name.trim().toLowerCase()
+        )
+        .reduce((sum, b) => sum + b.actualQty, 0);
+
+      const isDone =
+        s.isCompleted === true ||
+        (s.qty > 0 && done >= s.qty) ||
+        (s.qty > 0 && qualityDone >= s.qty);
+
+      if (isDone) {
+        doneStyleIds.add(s.id);
+        if (s.code) doneStyleCodes.add(s.code.trim().toLowerCase());
+        if (s.name) doneStyleNames.add(s.name.trim().toLowerCase());
+        continue;
+      }
+
+      activeStylesWithMetrics.push({
         id: s.id,
         code: s.code,
         name: s.name,
@@ -109,14 +124,28 @@ export function FactoryDashboard({
         plannedQty: planned,
         doneQty: done,
         remaining: Math.max(0, s.qty - done),
-      };
+      });
+    }
+
+    const todayPlans = plans.filter((p) => {
+      if (p.date !== todayStr) return false;
+      if (p.styleId && doneStyleIds.has(p.styleId)) return false;
+      if (p.styleCode && doneStyleCodes.has(p.styleCode.trim().toLowerCase())) return false;
+      if (p.styleName && doneStyleNames.has(p.styleName.trim().toLowerCase())) return false;
+      return true;
     });
+    const todayPlanQty = todayPlans.reduce((sum, p) => sum + p.planQty, 0);
+    const todayActualQty = todayPlans.reduce((sum, p) => sum + p.actualQty, 0);
+    const todayPct = todayPlanQty > 0 ? Math.round((todayActualQty / todayPlanQty) * 100) : 0;
+
+    const activeMachines = machines.filter((m) => m.status === 'Active').length;
+    const styleCards = activeStylesWithMetrics.slice(0, 6);
 
     return {
       companyCount: companies.length,
       machineCount: machines.length,
       activeMachines,
-      styleCount: styles.length,
+      styleCount: activeStylesWithMetrics.length,
       todayPlanQty,
       todayActualQty,
       todayPct,
@@ -124,115 +153,10 @@ export function FactoryDashboard({
       styleCards,
       machines,
     };
-  }, [productionBundle, todayStr]);
+  }, [productionBundle, qualityBundle, todayStr]);
 
   return (
     <div className="space-y-5">
-      {/* Top KPI Ribbon (Live Data Only) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* KPI 1: Live Employee Count */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Factory Workforce
-              </span>
-              <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                {stats.totalStaff}{' '}
-                <span className="text-xs font-semibold text-emerald-600 font-sans">
-                  ({stats.activeStaff} Active)
-                </span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Supervisors: {stats.supervisors}</span>
-            <span className="font-semibold text-indigo-700">Floor Staff: {stats.operators}</span>
-          </div>
-        </div>
-
-        {/* KPI 2: Live Basic Payroll Base */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Basic Payroll Base
-              </span>
-              <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                LKR {stats.totalBasic.toLocaleString()}
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <Wallet className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Est. EPF+ETF (23%):</span>
-            <span className="font-mono font-bold text-emerald-700">
-              LKR {stats.estStatutory.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: File Compliance */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Personal File Audit (5/5)
-              </span>
-              <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-                {stats.compliantCount}
-                <span className="text-sm font-semibold text-slate-400">/{stats.totalStaff}</span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <FileCheck className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Staff Records:</span>
-            <button
-              type="button"
-              onClick={() => onNavigate('employees')}
-              className="font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1 cursor-pointer"
-            >
-              Open Directory <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* KPI 4: Needle Management Shortcut */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Needle &amp; Safety Control
-              </span>
-              <div className="text-base font-extrabold text-slate-900 mt-1.5">
-                Tesco Audit Module
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Pin className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-            <span className="text-emerald-700 font-semibold">Active</span>
-            <button
-              type="button"
-              onClick={() => onNavigate('needle')}
-              className="font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1 cursor-pointer"
-            >
-              Open Needles <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         {/* Left 2 Cols: Live Production Plan & Machine Floor Summary */}
@@ -246,7 +170,7 @@ export function FactoryDashboard({
             </div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {prodStats.machineCount} Machines • {prodStats.styleCount} Styles •{' '}
+                {prodStats.machineCount} Machines • {prodStats.styleCount} Active Styles •{' '}
                 {prodStats.companyCount} Clients
               </span>
               <button
@@ -391,8 +315,32 @@ export function FactoryDashboard({
           </div>
         </div>
 
-        {/* Right Col: Workforce Breakdown + Quick Links + Roadmap */}
+        {/* Right Col: Workforce Summary + Role Breakdown & Quick Links */}
         <div className="space-y-5">
+          {/* Live Factory Workforce Card */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Factory Workforce
+                </span>
+                <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
+                  {stats.totalStaff}{' '}
+                  <span className="text-xs font-semibold text-emerald-600 font-sans">
+                    ({stats.activeStaff} Active)
+                  </span>
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Supervisors: {stats.supervisors}</span>
+              <span className="font-semibold text-indigo-700">Floor Staff: {stats.operators}</span>
+            </div>
+          </div>
+
           {/* Role Breakdown & Quick Payroll Shortcuts */}
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 space-y-3">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
@@ -442,118 +390,6 @@ export function FactoryDashboard({
                 className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
               >
                 <Table2 className="w-3.5 h-3.5" /> Salary Sheet
-              </button>
-            </div>
-          </div>
-
-          {/* ERP Systems Roadmap */}
-          <div className="bg-slate-950 text-white rounded-2xl border border-slate-800 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                ERP System Roadmap
-              </h3>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30">
-                <span className="font-bold flex items-center gap-2 text-emerald-200">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Payroll
-                </span>
-                <span className="text-[10px] font-mono font-bold text-emerald-300">Active</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('needle')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 transition cursor-pointer"
-              >
-                <span className="font-bold flex items-center gap-2 text-emerald-200">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Needle Management
-                </span>
-                <span className="text-[10px] font-mono font-bold text-emerald-300">Active</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('inventory')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 transition cursor-pointer"
-              >
-                <span className="font-bold flex items-center gap-2 text-emerald-200">
-                  <Layers className="w-3.5 h-3.5 text-emerald-400" />
-                  Normal Inventory
-                </span>
-                <span className="text-[10px] font-mono font-bold text-emerald-300">Active</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('production')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 transition cursor-pointer"
-              >
-                <span className="font-bold flex items-center gap-2 text-emerald-200">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Production Management
-                </span>
-                <span className="text-[10px] font-mono font-bold text-emerald-300">Active</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('quality')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
-              >
-                <span className="font-semibold flex items-center gap-2 text-emerald-300">
-                  <ClipboardCheck className="w-3.5 h-3.5" />
-                  Quality Checking
-                </span>
-                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Active
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('quotations')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
-              >
-                <span className="font-semibold flex items-center gap-2 text-emerald-300">
-                  <FileCheck className="w-3.5 h-3.5" />
-                  Invoices & Quotations
-                </span>
-                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Active
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('finance')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
-              >
-                <span className="font-semibold flex items-center gap-2 text-emerald-300">
-                  <Landmark className="w-3.5 h-3.5" />
-                  Financial Governance
-                </span>
-                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Active
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('adminUsers')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/50 transition cursor-pointer"
-              >
-                <span className="font-semibold flex items-center gap-2 text-emerald-300">
-                  <Users className="w-3.5 h-3.5" />
-                  User Access & Audit
-                </span>
-                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Active
-                </span>
               </button>
             </div>
           </div>
